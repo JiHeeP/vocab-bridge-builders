@@ -1,33 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Users, User, BarChart3, FileText, Printer, AlertTriangle, CheckCircle, TrendingUp, TrendingDown, Settings, ClipboardList } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
-import { getTierLabel, getTierColor, getTierBg, calculateErrorRate, getTier } from '@/lib/scoreService';
+import { ArrowLeft, Users, User, BarChart3, FileText, Printer, AlertTriangle, CheckCircle, TrendingDown, Settings, ClipboardList } from 'lucide-react';
+import {
+  getTierLabel,
+  getTierColor,
+  getTierBg,
+  calculateErrorRate,
+  getTier,
+  getAllStudents,
+  getLearningRecords,
+  type StudentData,
+  type LearningRecord,
+  type StageScore,
+} from '@/lib/scoreService';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import ContentManagementTab from '@/components/dashboard/ContentManagementTab';
-
-interface StudentData {
-  id: string;
-  name: string;
-  is_multicultural: boolean;
-  grade_class: string;
-}
-
-interface LearningRecord {
-  id: string;
-  student_id: string;
-  word_id: number;
-  word_text: string;
-  set_index: number;
-  stage_results: any;
-  total_score: number;
-  max_score: number;
-  error_rate: number;
-  tier: string;
-  completed: boolean;
-  created_at: string;
-}
 
 const DashboardPage = () => {
   const navigate = useNavigate();
@@ -43,11 +31,11 @@ const DashboardPage = () => {
 
   const loadData = async () => {
     const [studentsRes, recordsRes] = await Promise.all([
-      supabase.from('students').select('*').order('name'),
-      supabase.from('learning_records').select('*').order('created_at', { ascending: false }),
+      getAllStudents(),
+      getLearningRecords(),
     ]);
-    setStudents(studentsRes.data || []);
-    setRecords(recordsRes.data || []);
+    setStudents(studentsRes);
+    setRecords(recordsRes);
     setLoading(false);
   };
 
@@ -67,21 +55,20 @@ const DashboardPage = () => {
   const filteredRecords = (studentId?: string) => {
     let filtered = records;
     const dateFilter = getDateFilter();
-    if (dateFilter) filtered = filtered.filter(r => r.created_at >= dateFilter);
-    if (studentId) filtered = filtered.filter(r => r.student_id === studentId);
+    if (dateFilter) filtered = filtered.filter((r) => r.created_at >= dateFilter);
+    if (studentId) filtered = filtered.filter((r) => r.student_id === studentId);
     return filtered;
   };
 
-  // Student summary stats
   const getStudentSummary = (studentId: string) => {
     const recs = filteredRecords(studentId);
     if (recs.length === 0) return null;
     const totalScore = recs.reduce((sum, r) => sum + r.total_score, 0);
     const maxScore = recs.reduce((sum, r) => sum + r.max_score, 0);
     const avgErrorRate = maxScore > 0 ? calculateErrorRate(totalScore, maxScore) : 0;
-    const tier2Count = recs.filter(r => r.tier === 'tier2').length;
-    const tier3Count = recs.filter(r => r.tier === 'tier3').length;
-    const completedCount = recs.filter(r => r.completed).length;
+    const tier2Count = recs.filter((r) => r.tier === 'tier2').length;
+    const tier3Count = recs.filter((r) => r.tier === 'tier3').length;
+    const completedCount = recs.filter((r) => r.completed).length;
     return { totalScore, maxScore, avgErrorRate, tier2Count, tier3Count, completedCount, totalWords: recs.length };
   };
 
@@ -119,12 +106,10 @@ const DashboardPage = () => {
             <TabsTrigger value="results" className="flex items-center gap-2"><ClipboardList size={16} /> 결과 관리</TabsTrigger>
           </TabsList>
 
-          {/* Content Management Tab */}
           <TabsContent value="content">
             <ContentManagementTab students={students} onRefreshStudents={loadData} />
           </TabsContent>
 
-          {/* Results Management Tab */}
           <TabsContent value="results">
             <Tabs defaultValue="individual" className="print:block">
               <TabsList className="mb-6 print:hidden">
@@ -132,10 +117,11 @@ const DashboardPage = () => {
                 <TabsTrigger value="group" className="flex items-center gap-2"><Users size={16} /> 그룹 리포트</TabsTrigger>
               </TabsList>
 
-              {/* Date filter */}
               <div className="flex gap-2 mb-6 print:hidden">
-                {(['all', 'month', 'week'] as const).map(range => (
-                  <button key={range} onClick={() => setDateRange(range)}
+                {(['all', 'month', 'week'] as const).map((range) => (
+                  <button
+                    key={range}
+                    onClick={() => setDateRange(range)}
                     className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${dateRange === range ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground hover:bg-muted'}`}
                   >
                     {range === 'all' ? '전체' : range === 'month' ? '이번 달' : '이번 주'}
@@ -143,16 +129,17 @@ const DashboardPage = () => {
                 ))}
               </div>
 
-              {/* Level 2: Individual Report */}
               <TabsContent value="individual">
                 {!selectedStudent ? (
                   <div>
                     <h2 className="text-xl font-bold text-foreground mb-4">학생 목록</h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {students.map(student => {
+                      {students.map((student) => {
                         const summary = getStudentSummary(student.id);
                         return (
-                          <button key={student.id} onClick={() => setSelectedStudent(student)}
+                          <button
+                            key={student.id}
+                            onClick={() => setSelectedStudent(student)}
                             className="bg-card border border-border rounded-2xl p-5 text-left hover:border-primary hover:shadow-md transition-all"
                           >
                             <div className="flex items-center justify-between mb-3">
@@ -214,7 +201,6 @@ const DashboardPage = () => {
                 )}
               </TabsContent>
 
-              {/* Level 3: Group Report */}
               <TabsContent value="group">
                 <GroupReport students={students} records={filteredRecords()} />
               </TabsContent>
@@ -226,7 +212,6 @@ const DashboardPage = () => {
   );
 };
 
-// Level 2: Student Individual Report
 const StudentReport: React.FC<{
   student: StudentData;
   records: LearningRecord[];
@@ -246,7 +231,6 @@ const StudentReport: React.FC<{
   const overallErrorRate = calculateErrorRate(totalScore, maxScore);
   const overallTier = getTier(overallErrorRate);
 
-  // Stage-by-stage breakdown
   const stageScores: Record<number, { total: number; max: number; count: number }> = {};
   for (const rec of records) {
     const stages = Array.isArray(rec.stage_results) ? rec.stage_results : [];
@@ -258,21 +242,18 @@ const StudentReport: React.FC<{
     }
   }
 
-  // Sort words by error rate (highest first)
   const sortedRecords = [...records].sort((a, b) => b.error_rate - a.error_rate);
-
-  const tier2Words = records.filter(r => r.tier === 'tier2');
-  const tier3Words = records.filter(r => r.tier === 'tier3');
-  const firstTryCount = records.filter(r => {
-    const stages = Array.isArray(r.stage_results) ? r.stage_results : [];
-    return stages.every((s: any) => s.score === 2);
+  const tier2Words = records.filter((r) => r.tier === 'tier2');
+  const tier3Words = records.filter((r) => r.tier === 'tier3');
+  const firstTryCount = records.filter((r) => {
+    const stages = Array.isArray(r.stage_results) ? (r.stage_results as StageScore[]) : [];
+    return stages.every((s) => s.score === 2);
   }).length;
 
   return (
     <div>
       <button onClick={onBack} className="mb-4 text-primary font-bold hover:underline print:hidden">← 목록으로</button>
 
-      {/* Header */}
       <div className="bg-card border border-border rounded-2xl p-6 mb-6 print:border-2">
         <div className="flex items-center justify-between mb-4">
           <div>
@@ -284,7 +265,6 @@ const StudentReport: React.FC<{
           </div>
         </div>
 
-        {/* Summary stats */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <div className="bg-muted rounded-xl p-4 text-center">
             <div className="text-xs text-muted-foreground mb-1">종합 점수</div>
@@ -311,13 +291,12 @@ const StudentReport: React.FC<{
         </div>
       </div>
 
-      {/* Stage breakdown */}
       <div className="bg-card border border-border rounded-2xl p-6 mb-6">
         <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
           <BarChart3 size={20} className="text-primary" /> 단계별 수행률
         </h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[2, 3, 4, 5].map(stage => {
+          {[2, 3, 4, 5].map((stage) => {
             const data = stageScores[stage];
             const rate = data ? Math.round((data.total / data.max) * 100) : 0;
             const stepNames = ['', '', '매칭', '관련어', '음절블록', '퀴즈+문장'];
@@ -337,7 +316,6 @@ const StudentReport: React.FC<{
         </div>
       </div>
 
-      {/* Word detail table */}
       <div className="bg-card border border-border rounded-2xl p-6">
         <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
           <FileText size={20} className="text-primary" /> 단어별 상세 (오류율 높은 순)
@@ -357,10 +335,10 @@ const StudentReport: React.FC<{
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortedRecords.map(rec => {
-                const stages = Array.isArray(rec.stage_results) ? rec.stage_results : [];
+              {sortedRecords.map((rec) => {
+                const stages = Array.isArray(rec.stage_results) ? (rec.stage_results as StageScore[]) : [];
                 const stageMap: Record<number, number> = {};
-                stages.forEach((s: any) => { stageMap[s.stage] = s.score; });
+                stages.forEach((s) => { stageMap[s.stage] = s.score; });
                 return (
                   <TableRow key={rec.id}>
                     <TableCell className="font-bold">{rec.word_text}</TableCell>
@@ -373,7 +351,7 @@ const StudentReport: React.FC<{
                         {getTierLabel(rec.tier)}
                       </span>
                     </TableCell>
-                    {[2, 3, 4, 5].map(s => (
+                    {[2, 3, 4, 5].map((s) => (
                       <TableCell key={s} className="text-center">
                         {stageMap[s] !== undefined ? (
                           <span className={`font-bold ${stageMap[s] === 2 ? 'text-success' : stageMap[s] === 1 ? 'text-warning' : 'text-destructive'}`}>
@@ -392,19 +370,18 @@ const StudentReport: React.FC<{
         </div>
       </div>
 
-      {/* Tier 2/3 focus words */}
       {(tier2Words.length > 0 || tier3Words.length > 0) && (
         <div className="bg-destructive/5 border border-destructive/20 rounded-2xl p-6 mt-6">
           <h3 className="text-lg font-bold text-destructive mb-4 flex items-center gap-2">
             <AlertTriangle size={20} /> 집중 관리 필요 단어
           </h3>
           <div className="flex flex-wrap gap-2">
-            {tier3Words.map(r => (
+            {tier3Words.map((r) => (
               <span key={r.id} className="bg-destructive/10 text-destructive border border-destructive/30 px-3 py-1 rounded-full text-sm font-bold">
                 🔴 {r.word_text} ({r.error_rate.toFixed(1)}%)
               </span>
             ))}
-            {tier2Words.map(r => (
+            {tier2Words.map((r) => (
               <span key={r.id} className="bg-orange-50 text-orange-600 border border-orange-300 px-3 py-1 rounded-full text-sm font-bold">
                 🟠 {r.word_text} ({r.error_rate.toFixed(1)}%)
               </span>
@@ -416,7 +393,6 @@ const StudentReport: React.FC<{
   );
 };
 
-// Level 3: Group Report
 const GroupReport: React.FC<{
   students: StudentData[];
   records: LearningRecord[];
@@ -430,9 +406,9 @@ const GroupReport: React.FC<{
     );
   }
 
-  const multiculturalIds = new Set(students.filter(s => s.is_multicultural).map(s => s.id));
-  const generalRecords = records.filter(r => !multiculturalIds.has(r.student_id));
-  const multiRecords = records.filter(r => multiculturalIds.has(r.student_id));
+  const multiculturalIds = new Set(students.filter((s) => s.is_multicultural).map((s) => s.id));
+  const generalRecords = records.filter((r) => !multiculturalIds.has(r.student_id));
+  const multiRecords = records.filter((r) => multiculturalIds.has(r.student_id));
 
   const calcGroupStats = (recs: LearningRecord[]) => {
     if (recs.length === 0) return { avgErrorRate: 0, avgScore: 0, count: 0, stageRates: {} as Record<number, number> };
@@ -455,7 +431,7 @@ const GroupReport: React.FC<{
 
     return {
       avgErrorRate: maxScore > 0 ? calculateErrorRate(totalScore, maxScore) : 0,
-      avgScore: recs.length > 0 ? Math.round(totalScore / recs.length * 10) / 10 : 0,
+      avgScore: recs.length > 0 ? Math.round((totalScore / recs.length) * 10) / 10 : 0,
       count: recs.length,
       stageRates,
     };
@@ -465,7 +441,6 @@ const GroupReport: React.FC<{
   const generalStats = calcGroupStats(generalRecords);
   const multiStats = calcGroupStats(multiRecords);
 
-  // Common weak words across multicultural group
   const multiWordScores: Record<string, { total: number; max: number; count: number }> = {};
   for (const rec of multiRecords) {
     if (!multiWordScores[rec.word_text]) multiWordScores[rec.word_text] = { total: 0, max: 0, count: 0 };
@@ -475,7 +450,7 @@ const GroupReport: React.FC<{
   }
   const weakWords = Object.entries(multiWordScores)
     .map(([word, data]) => ({ word, errorRate: calculateErrorRate(data.total, data.max) }))
-    .filter(w => w.errorRate > 35)
+    .filter((w) => w.errorRate > 35)
     .sort((a, b) => b.errorRate - a.errorRate)
     .slice(0, 10);
 
@@ -485,13 +460,12 @@ const GroupReport: React.FC<{
     <div>
       <h2 className="text-xl font-bold text-foreground mb-6">월간 그룹 비교 리포트</h2>
 
-      {/* Group comparison */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         {[
-          { label: '전체', stats: allStats, color: 'primary' },
-          { label: '일반 학생', stats: generalStats, color: 'primary' },
-          { label: '다문화 학생', stats: multiStats, color: 'secondary' },
-        ].map(group => (
+          { label: '전체', stats: allStats },
+          { label: '일반 학생', stats: generalStats },
+          { label: '다문화 학생', stats: multiStats },
+        ].map((group) => (
           <div key={group.label} className="bg-card border border-border rounded-2xl p-5">
             <div className="text-sm text-muted-foreground mb-2 font-bold">{group.label}</div>
             <div className="text-3xl font-bold text-foreground mb-1">{group.stats.avgErrorRate.toFixed(1)}%</div>
@@ -500,7 +474,6 @@ const GroupReport: React.FC<{
         ))}
       </div>
 
-      {/* Gap analysis */}
       {multiRecords.length > 0 && generalRecords.length > 0 && (
         <div className="bg-card border border-border rounded-2xl p-6 mb-6">
           <h3 className="text-lg font-bold text-foreground mb-4">단계별 격차 분석</h3>
@@ -515,7 +488,7 @@ const GroupReport: React.FC<{
               </TableRow>
             </TableHeader>
             <TableBody>
-              {[2, 3, 4, 5].map(stage => {
+              {[2, 3, 4, 5].map((stage) => {
                 const genRate = generalStats.stageRates[stage] || 0;
                 const multiRate = multiStats.stageRates[stage] || 0;
                 const gap = genRate - multiRate;
@@ -531,8 +504,8 @@ const GroupReport: React.FC<{
                     </TableCell>
                     <TableCell className="text-center">
                       {gap > 10 ? <TrendingDown className="inline text-destructive" size={16} /> :
-                       gap > 5 ? <AlertTriangle className="inline text-warning" size={16} /> :
-                       <CheckCircle className="inline text-success" size={16} />}
+                        gap > 5 ? <AlertTriangle className="inline text-warning" size={16} /> :
+                          <CheckCircle className="inline text-success" size={16} />}
                     </TableCell>
                   </TableRow>
                 );
@@ -542,12 +515,11 @@ const GroupReport: React.FC<{
         </div>
       )}
 
-      {/* Weak words */}
       {weakWords.length > 0 && (
         <div className="bg-card border border-border rounded-2xl p-6 mb-6">
           <h3 className="text-lg font-bold text-foreground mb-4">다문화 그룹 공통 취약 단어 (Top 10)</h3>
           <div className="flex flex-wrap gap-2">
-            {weakWords.map(w => (
+            {weakWords.map((w) => (
               <span key={w.word} className={`px-3 py-1 rounded-full text-sm font-bold border ${getTierBg(getTier(w.errorRate))} ${getTierColor(getTier(w.errorRate))}`}>
                 {w.word} ({w.errorRate.toFixed(1)}%)
               </span>
@@ -556,7 +528,6 @@ const GroupReport: React.FC<{
         </div>
       )}
 
-      {/* Per-student overview */}
       <div className="bg-card border border-border rounded-2xl p-6">
         <h3 className="text-lg font-bold text-foreground mb-4">학생별 요약</h3>
         <Table>
@@ -570,8 +541,8 @@ const GroupReport: React.FC<{
             </TableRow>
           </TableHeader>
           <TableBody>
-            {students.map(s => {
-              const recs = records.filter(r => r.student_id === s.id);
+            {students.map((s) => {
+              const recs = records.filter((r) => r.student_id === s.id);
               if (recs.length === 0) return null;
               const total = recs.reduce((sum, r) => sum + r.total_score, 0);
               const max = recs.reduce((sum, r) => sum + r.max_score, 0);

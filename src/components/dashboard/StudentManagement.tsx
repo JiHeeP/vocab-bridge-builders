@@ -1,15 +1,9 @@
 import React, { useState } from 'react';
 import { Users, Plus, Trash2, Edit2, Check, X } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/hooks/use-toast';
-
-interface StudentData {
-  id: string;
-  name: string;
-  is_multicultural: boolean;
-  grade_class: string;
-}
+import { api } from '@/lib/api';
+import type { StudentData } from '@/lib/scoreService';
 
 interface Props {
   students: StudentData[];
@@ -25,20 +19,24 @@ const StudentManagement: React.FC<Props> = ({ students, onRefresh }) => {
 
   const handleAdd = async () => {
     if (!newName.trim()) return;
-    const { error } = await supabase.from('students').insert({ name: newName.trim(), is_multicultural: newMulti });
-    if (error) {
-      toast({ title: '추가 실패', description: error.message, variant: 'destructive' });
-    } else {
+
+    try {
+      await api<StudentData>('/api/students', {
+        method: 'POST',
+        body: JSON.stringify({ name: newName.trim(), is_multicultural: newMulti }),
+      });
       setNewName('');
       setNewMulti(false);
       onRefresh();
       toast({ title: '학생 추가 완료' });
+    } catch (error) {
+      toast({ title: '추가 실패', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
     }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('이 학생을 삭제하시겠습니까?')) return;
-    await supabase.from('students').delete().eq('id', id);
+    await api<void>(`/api/students/${id}`, { method: 'DELETE' });
     onRefresh();
   };
 
@@ -50,7 +48,11 @@ const StudentManagement: React.FC<Props> = ({ students, onRefresh }) => {
 
   const handleSaveEdit = async () => {
     if (!editingId || !editName.trim()) return;
-    await supabase.from('students').update({ name: editName.trim(), is_multicultural: editMulti }).eq('id', editingId);
+
+    await api<StudentData>(`/api/students/${editingId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name: editName.trim(), is_multicultural: editMulti }),
+    });
     setEditingId(null);
     onRefresh();
   };
@@ -61,15 +63,14 @@ const StudentManagement: React.FC<Props> = ({ students, onRefresh }) => {
         <Users size={20} className="text-primary" /> 학생 관리
       </h3>
 
-      {/* Add new student */}
       <div className="flex items-center gap-3 mb-4 p-3 bg-muted rounded-xl">
         <input
           type="text"
           value={newName}
-          onChange={e => setNewName(e.target.value)}
+          onChange={(e) => setNewName(e.target.value)}
           placeholder="학생 이름"
           className="flex-1 bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground"
-          onKeyDown={e => e.key === 'Enter' && handleAdd()}
+          onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
         />
         <label className="flex items-center gap-2 text-sm text-foreground whitespace-nowrap">
           <Checkbox checked={newMulti} onCheckedChange={(v) => setNewMulti(!!v)} />
@@ -80,15 +81,14 @@ const StudentManagement: React.FC<Props> = ({ students, onRefresh }) => {
         </button>
       </div>
 
-      {/* Student list */}
       <div className="space-y-2 max-h-80 overflow-y-auto">
-        {students.map(s => (
+        {students.map((s) => (
           <div key={s.id} className="flex items-center gap-3 p-3 bg-muted/50 rounded-xl">
             {editingId === s.id ? (
               <>
                 <input
                   value={editName}
-                  onChange={e => setEditName(e.target.value)}
+                  onChange={(e) => setEditName(e.target.value)}
                   className="flex-1 bg-background border border-border rounded-lg px-3 py-1.5 text-sm text-foreground"
                 />
                 <label className="flex items-center gap-2 text-sm text-foreground whitespace-nowrap">

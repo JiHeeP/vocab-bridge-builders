@@ -1,9 +1,10 @@
-import { supabase } from '@/integrations/supabase/client';
+import { api } from "@/lib/api";
+import type { VocabSession } from "@/lib/vocabData";
 
 export interface StageScore {
   stage: number;
-  score: number; // 0, 1, or 2
-  timeSpent: number; // seconds
+  score: number;
+  timeSpent: number;
 }
 
 export interface WordStageScore {
@@ -13,75 +14,127 @@ export interface WordStageScore {
   timeSpent: number;
 }
 
+export interface StudentData {
+  id: string;
+  name: string;
+  is_multicultural: boolean;
+  grade_class: string;
+  created_at?: string;
+}
+
+export interface LearningRecord {
+  id: string;
+  student_id: string;
+  vocab_session_id?: string | null;
+  word_id: number;
+  word_text: string;
+  set_index: number;
+  stage_results: StageScore[];
+  total_score: number;
+  max_score: number;
+  error_rate: number;
+  tier: string;
+  completed: boolean;
+  created_at: string;
+}
+
+export interface InterventionLog {
+  id: string;
+  student_id: string;
+  intervention_type: string;
+  focus_words: string[];
+  duration_min: number;
+  before_error_rate: number | null;
+  after_error_rate: number | null;
+  memo: string | null;
+  created_at: string;
+  student?: { name: string };
+}
+
 export function calculateErrorRate(totalScore: number, maxScore: number): number {
   if (maxScore === 0) return 0;
   return Math.round((1 - totalScore / maxScore) * 1000) / 10;
 }
 
-export function getTier(errorRate: number): 'acquired' | 'developing' | 'tier2' | 'tier3' {
-  if (errorRate <= 20) return 'acquired';
-  if (errorRate <= 35) return 'developing';
-  if (errorRate <= 50) return 'tier2';
-  return 'tier3';
+export function getTier(errorRate: number): "acquired" | "developing" | "tier2" | "tier3" {
+  if (errorRate <= 20) return "acquired";
+  if (errorRate <= 35) return "developing";
+  if (errorRate <= 50) return "tier2";
+  return "tier3";
 }
 
 export function getTierLabel(tier: string): string {
   switch (tier) {
-    case 'acquired': return '습득 완료';
-    case 'developing': return '발달 중';
-    case 'tier2': return 'Tier 2 (보충)';
-    case 'tier3': return 'Tier 3 (집중)';
-    default: return tier;
+    case "acquired":
+      return "습득 완료";
+    case "developing":
+      return "발달 중";
+    case "tier2":
+      return "Tier 2 (보충)";
+    case "tier3":
+      return "Tier 3 (집중)";
+    default:
+      return tier;
   }
 }
 
 export function getTierColor(tier: string): string {
   switch (tier) {
-    case 'acquired': return 'text-success';
-    case 'developing': return 'text-warning';
-    case 'tier2': return 'text-orange-500';
-    case 'tier3': return 'text-destructive';
-    default: return 'text-muted-foreground';
+    case "acquired":
+      return "text-success";
+    case "developing":
+      return "text-warning";
+    case "tier2":
+      return "text-orange-500";
+    case "tier3":
+      return "text-destructive";
+    default:
+      return "text-muted-foreground";
   }
 }
 
 export function getTierBg(tier: string): string {
   switch (tier) {
-    case 'acquired': return 'bg-success/10 border-success/30';
-    case 'developing': return 'bg-warning/10 border-warning/30';
-    case 'tier2': return 'bg-orange-50 border-orange-300';
-    case 'tier3': return 'bg-destructive/10 border-destructive/30';
-    default: return 'bg-muted';
+    case "acquired":
+      return "bg-success/10 border-success/30";
+    case "developing":
+      return "bg-warning/10 border-warning/30";
+    case "tier2":
+      return "bg-orange-50 border-orange-300";
+    case "tier3":
+      return "bg-destructive/10 border-destructive/30";
+    default:
+      return "bg-muted";
   }
 }
 
-// Get or create student in DB
 export async function getOrCreateStudent(name: string): Promise<string> {
-  const { data } = await supabase
-    .from('students')
-    .select('id')
-    .eq('name', name)
-    .maybeSingle();
+  const student = await api<StudentData>("/api/students/get-or-create", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
 
-  if (data) return data.id;
-
-  const { data: newStudent, error } = await supabase
-    .from('students')
-    .insert({ name })
-    .select('id')
-    .single();
-
-  if (error) throw error;
-  return newStudent!.id;
+  return student.id;
 }
 
-// Save learning records for a set
 export async function saveLearningRecords(
   studentId: string,
-  setIndex: number,
-  wordScores: Map<number, { wordText: string; stages: Map<number, StageScore> }>
+  session: Pick<VocabSession, "id" | "sessionNo">,
+  wordScores: Map<number, { wordText: string; stages: Map<number, StageScore> }>,
 ) {
-  const records: any[] = [];
+  const records: Array<{
+    student_id: string;
+    vocab_session_id: string;
+    word_id: number;
+    word_text: string;
+    set_index: number;
+    stage_results: StageScore[];
+    total_score: number;
+    max_score: number;
+    error_rate: number;
+    tier: string;
+    completed: boolean;
+  }> = [];
 
   for (const [wordId, data] of wordScores) {
     const stageResults: StageScore[] = [];
@@ -94,16 +147,17 @@ export async function saveLearningRecords(
 
     if (stageResults.length === 0) continue;
 
-    const maxScore = 8; // Steps 2-5, each max 2pts
+    const maxScore = 8;
     const errorRate = calculateErrorRate(totalScore, maxScore);
     const tier = getTier(errorRate);
     const completed = stageResults.length >= 4;
 
     records.push({
       student_id: studentId,
+      vocab_session_id: session.id,
       word_id: wordId,
       word_text: data.wordText,
-      set_index: setIndex,
+      set_index: session.sessionNo,
       stage_results: stageResults,
       total_score: totalScore,
       max_score: maxScore,
@@ -115,70 +169,51 @@ export async function saveLearningRecords(
 
   if (records.length === 0) return;
 
-  const { error } = await supabase
-    .from('learning_records')
-    .insert(records);
-
-  if (error) console.error('Error saving records:', error);
+  await api<LearningRecord[]>("/api/learning-records", {
+    method: "POST",
+    body: JSON.stringify({ records }),
+  });
 }
 
-// Fetch student report data
+export async function getLearningRecords(filters: {
+  studentId?: string;
+  from?: string;
+  to?: string;
+} = {}) {
+  const params = new URLSearchParams();
+
+  if (filters.studentId) params.set("studentId", filters.studentId);
+  if (filters.from) params.set("from", filters.from);
+  if (filters.to) params.set("to", filters.to);
+
+  const query = params.toString();
+  return api<LearningRecord[]>(`/api/learning-records${query ? `?${query}` : ""}`);
+}
+
 export async function getStudentReport(studentId: string, from?: string, to?: string) {
-  let query = supabase
-    .from('learning_records')
-    .select('*')
-    .eq('student_id', studentId)
-    .order('created_at', { ascending: false });
-
-  if (from) query = query.gte('created_at', from);
-  if (to) query = query.lte('created_at', to);
-
-  const { data, error } = await query;
-  if (error) throw error;
-  return data || [];
+  return getLearningRecords({ studentId, from, to });
 }
 
-// Fetch all students
 export async function getAllStudents() {
-  const { data, error } = await supabase
-    .from('students')
-    .select('*')
-    .order('name');
-
-  if (error) throw error;
-  return data || [];
+  return api<StudentData[]>("/api/students");
 }
 
-// Fetch group report data
 export async function getGroupReport(gradeClass: string, from?: string, to?: string) {
-  let query = supabase
-    .from('learning_records')
-    .select('*, students!inner(name, is_multicultural, grade_class)')
-    .eq('students.grade_class', gradeClass);
+  const params = new URLSearchParams({ gradeClass });
 
-  if (from) query = query.gte('created_at', from);
-  if (to) query = query.lte('created_at', to);
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
 
-  const { data, error } = await query;
-  if (error) throw error;
-  return data || [];
+  return api<Array<LearningRecord & { student: Pick<StudentData, "name" | "is_multicultural" | "grade_class"> }>>(
+    `/api/learning-records/group?${params}`,
+  );
 }
 
-// Fetch intervention logs
 export async function getInterventionLogs(studentId?: string) {
-  let query = supabase
-    .from('intervention_logs')
-    .select('*, students(name)')
-    .order('created_at', { ascending: false });
-
-  if (studentId) query = query.eq('student_id', studentId);
-
-  const { data, error } = await query;
-  if (error) throw error;
-  return data || [];
+  const query = studentId ? `?studentId=${encodeURIComponent(studentId)}` : "";
+  return api<InterventionLog[]>(`/api/intervention-logs${query}`);
 }
 
-// Save intervention log
 export async function saveInterventionLog(log: {
   student_id: string;
   intervention_type: string;
@@ -188,12 +223,8 @@ export async function saveInterventionLog(log: {
   after_error_rate?: number;
   memo?: string;
 }) {
-  const { error } = await supabase
-    .from('intervention_logs')
-    .insert({
-      ...log,
-      focus_words: log.focus_words as any,
-    });
-
-  if (error) throw error;
+  return api<InterventionLog>("/api/intervention-logs", {
+    method: "POST",
+    body: JSON.stringify(log),
+  });
 }
