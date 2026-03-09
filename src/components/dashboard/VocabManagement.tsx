@@ -231,8 +231,13 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
 
   const handleImport = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!selectedSession || !uploadFile) {
-      toast({ title: "세션과 파일을 모두 선택하세요", variant: "destructive" });
+    if (!uploadFile) {
+      toast({ title: "업로드 파일을 선택하세요", variant: "destructive" });
+      return;
+    }
+
+    if (selectedCategory === "content" && !selectedSubject) {
+      toast({ title: "과목을 먼저 선택하세요", variant: "destructive" });
       return;
     }
 
@@ -240,17 +245,20 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
     try {
       const result = await importVocabSpreadsheet({
         file: uploadFile,
-        category: selectedSession.category,
-        subject: selectedSession.subject,
-        sessionId: selectedSession.id,
+        category: selectedCategory,
+        subject: selectedCategory === "content" ? selectedSubject : null,
       });
 
       setUploadFile(null);
-      setWords(await getVocabSessionWords(selectedSession.id));
-      setCatalog(await getVocabCatalog(true));
+      const nextCatalog = await getVocabCatalog(true);
+      setCatalog(nextCatalog);
+      if (result.createdSessions.length > 0) {
+        setSelectedSessionId(result.createdSessions[0].id);
+        setWords(await getVocabSessionWords(result.createdSessions[0].id));
+      }
       toast({
         title: "어휘 업로드 완료",
-        description: `추가 ${result.insertedCount}개 · 중복 건너뜀 ${result.skippedCount}개 · 실패 ${result.failedRows.length}개`,
+        description: `추가 ${result.insertedCount}개 · 생성 세션 ${result.createdSessions.length}개 · 중복 건너뜀 ${result.skippedCount}개 · 실패 ${result.failedRows.length}개`,
       });
     } catch (error) {
       toast({ title: "업로드 실패", description: String(error), variant: "destructive" });
@@ -554,7 +562,7 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
               </div>
               <form onSubmit={handleImport} className="space-y-3">
                 <div className="text-xs text-muted-foreground">
-                  현재 CSV와 동일한 컬럼 양식을 사용하고, 라벨은 이 화면의 선택 세션을 따릅니다.
+                  현재 CSV와 동일한 컬럼 양식을 사용합니다. 업로드한 어휘는 선택한 분류 기준으로 10개씩 자동 분할되어 새 세션이 만들어집니다.
                 </div>
                 <input
                   type="file"
@@ -562,9 +570,12 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                   onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
                   className="block w-full text-sm text-foreground file:mr-3 file:rounded-xl file:border-0 file:bg-primary file:px-4 file:py-2 file:font-bold file:text-primary-foreground"
                 />
-                <button type="submit" disabled={importing || !selectedSession || !uploadFile} className="inline-flex items-center justify-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-bold text-foreground hover:bg-muted disabled:opacity-50">
+                <div className="text-xs text-muted-foreground">
+                  업로드 대상: {selectedCategory === "tool" ? VOCAB_CATEGORY_LABELS.tool : `${VOCAB_CATEGORY_LABELS.content} · ${selectedSubject ?? "과목 선택 필요"}`}
+                </div>
+                <button type="submit" disabled={importing || !uploadFile || (selectedCategory === "content" && !selectedSubject)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-bold text-foreground hover:bg-muted disabled:opacity-50">
                   {importing ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-                  현재 세션에 업로드
+                  자동 세션 분할 업로드
                 </button>
               </form>
             </div>
