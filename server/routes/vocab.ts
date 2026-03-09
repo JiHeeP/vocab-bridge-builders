@@ -128,7 +128,7 @@ router.post("/words", async (req, res, next) => {
 
 router.post("/import", upload.single("file"), async (req, res, next) => {
   try {
-    const { category, subject = null, sessionId } = req.body ?? {};
+    const { category, subject = null } = req.body ?? {};
     if (!req.file) {
       return res.status(400).send("file is required");
     }
@@ -145,13 +145,8 @@ router.post("/import", upload.single("file"), async (req, res, next) => {
       return res.status(400).send("tool sessions cannot include subject");
     }
 
-    if (!sessionId) {
-      return res.status(400).send("sessionId is required");
-    }
-
     res.json(
       await importVocabSpreadsheet({
-        sessionId,
         category,
         subject,
         buffer: req.file.buffer,

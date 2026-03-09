@@ -63,6 +63,8 @@ interface ImportedRowFailure {
   reason: string;
 }
 
+const IMPORT_SESSION_SIZE = 10;
+
 interface CreateWordInput {
   sessionId: string;
   preferredId?: number;
@@ -632,12 +634,41 @@ export async function createVocabWord(input: CreateWordInput): Promise<VocabWord
   }
 }
 
-async function getSessionForImport(sessionId: string) {
-  const result = await pool.query<{ category: VocabCategory; subject: VocabSubject | null }>(
-    "SELECT category, subject FROM vocab_sessions WHERE id = $1",
-    [sessionId],
+async function getNextSessionNo(
+  client: PoolClient,
+  category: VocabCategory,
+  subject: VocabSubject | null,
+): Promise<number> {
+  const result = await client.query<{ next_session_no: number }>(
+    `
+      SELECT COALESCE(MAX(session_no), 0) + 1 AS next_session_no
+      FROM vocab_sessions
+      WHERE category = $1
+        AND COALESCE(subject, '') = COALESCE($2, '')
+    `,
+    [category, subject],
   );
-  return result.rows[0] ?? null;
+
+  return result.rows[0]?.next_session_no ?? 1;
+}
+
+async function createImportSession(
+  client: PoolClient,
+  category: VocabCategory,
+  subject: VocabSubject | null,
+  sessionNo: number,
+): Promise<VocabSessionSummary> {
+  const label = `${DEFAULT_SESSION_LABEL} ${sessionNo}`;
+  const result = await client.query(
+    `
+      INSERT INTO vocab_sessions (category, subject, session_no, label, is_active)
+      VALUES ($1, $2, $3, $4, true)
+      RETURNING id, category, subject, session_no, label, is_active, 0::int AS word_count
+    `,
+    [category, subject, sessionNo, label],
+  );
+
+  return mapSessionRow(result.rows[0]);
 }
 
 function parseSpreadsheet(buffer: Buffer, originalName: string): ParsedCsvWord[] {
@@ -658,24 +689,19 @@ function parseSpreadsheet(buffer: Buffer, originalName: string): ParsedCsvWord[]
 }
 
 export async function importVocabSpreadsheet(input: {
-  sessionId: string;
   category: VocabCategory;
-  subject?: string | null;
+  subject?: VocabSubject | null;
   buffer: Buffer;
   originalName: string;
-}): Promise<{ insertedCount: number; skippedCount: number; failedRows: ImportedRowFailure[] }> {
-  const session = await getSessionForImport(input.sessionId);
-  if (!session) {
-    throw new Error("session not found");
-  }
-
-  if (session.category !== input.category) {
-    throw new Error("selected session does not match category");
-  }
-
+}): Promise<{
+  insertedCount: number;
+  skippedCount: number;
+  failedRows: ImportedRowFailure[];
+  createdSessions: VocabSessionSummary[];
+}> {
   if (input.category === "content") {
-    if (!input.subject || session.subject !== input.subject) {
-      throw new Error("selected session does not match subject");
+    if (!input.subject) {
+      throw new Error("content import requires a subject");
     }
   } else if (input.subject) {
     throw new Error("tool session import cannot include subject");
@@ -687,13 +713,24 @@ export async function importVocabSpreadsheet(input: {
   try {
     await client.query("BEGIN");
 
+    const subject = input.category === "content" ? (input.subject ?? null) : null;
     const existingWords = await client.query<{ word: string }>(
-      "SELECT word FROM vocab_words WHERE session_id = $1",
-      [input.sessionId],
+      `
+        SELECT w.word
+        FROM vocab_words w
+        JOIN vocab_sessions s ON s.id = w.session_id
+        WHERE s.category = $1
+          AND COALESCE(s.subject, '') = COALESCE($2, '')
+      `,
+      [input.category, subject],
     );
     const usedWords = new Set(existingWords.rows.map((row) => row.word.trim().toLowerCase()));
     const usedIds = await getUsedIds(client);
     const nextIdRef = { value: await getNextWordId(client) };
+    const createdSessions: VocabSessionSummary[] = [];
+    let nextSessionNo = await getNextSessionNo(client, input.category, subject);
+    let currentSession: VocabSessionSummary | null = null;
+    let currentSessionWordCount = 0;
 
     let insertedCount = 0;
     let skippedCount = 0;
@@ -715,8 +752,15 @@ export async function importVocabSpreadsheet(input: {
       }
 
       try {
+        if (!currentSession || currentSessionWordCount >= IMPORT_SESSION_SIZE) {
+          currentSession = await createImportSession(client, input.category, subject, nextSessionNo);
+          createdSessions.push(currentSession);
+          currentSessionWordCount = 0;
+          nextSessionNo += 1;
+        }
+
         await createVocabWord({
-          sessionId: input.sessionId,
+          sessionId: currentSession.id,
           preferredId: row.id,
           word: row.word,
           meaning: row.meaning,
@@ -724,7 +768,7 @@ export async function importVocabSpreadsheet(input: {
           relatedWords: row.relatedWords,
           l4: row.l4,
           l5: row.l5,
-          displayOrder: insertedCount + (existingWords.rows.length || 0) + 1,
+          displayOrder: currentSessionWordCount + 1,
           sourceType: "excel",
           client,
           usedIds,
@@ -732,6 +776,7 @@ export async function importVocabSpreadsheet(input: {
         });
         usedWords.add(normalizedWord);
         insertedCount += 1;
+        currentSessionWordCount += 1;
       } catch (error) {
         failedRows.push({
           rowNumber,
@@ -741,7 +786,7 @@ export async function importVocabSpreadsheet(input: {
     }
 
     await client.query("COMMIT");
-    return { insertedCount, skippedCount, failedRows };
+    return { insertedCount, skippedCount, failedRows, createdSessions };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

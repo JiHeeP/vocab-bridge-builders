@@ -54,6 +54,7 @@ export interface VocabImportResult {
   insertedCount: number;
   skippedCount: number;
   failedRows: VocabImportFailure[];
+  createdSessions: VocabSession[];
 }
 
 export interface CreateVocabWordInput {
@@ -199,7 +200,6 @@ export async function importVocabSpreadsheet(input: {
   file: File;
   category: VocabCategory;
   subject?: VocabSubject | null;
-  sessionId: string;
 }): Promise<VocabImportResult> {
   const formData = new FormData();
   formData.append("file", input.file);
@@ -207,16 +207,17 @@ export async function importVocabSpreadsheet(input: {
   if (input.subject) {
     formData.append("subject", input.subject);
   }
-  formData.append("sessionId", input.sessionId);
 
-  const result = await api<VocabImportResult>("/api/vocab/import", {
+  const result = await api<Omit<VocabImportResult, "createdSessions"> & { createdSessions: any[] }>("/api/vocab/import", {
     method: "POST",
     body: formData,
   });
 
-  wordsCache.delete(input.sessionId);
   invalidateVocabCache();
-  return result;
+  return {
+    ...result,
+    createdSessions: Array.isArray(result.createdSessions) ? result.createdSessions.map(normalizeSession) : [],
+  };
 }
 
 export function invalidateVocabCache() {
