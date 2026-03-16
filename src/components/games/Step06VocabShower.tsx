@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Play, RotateCcw, Award } from 'lucide-react';
-import { type VocabWord, generateBadWords, pick } from '@/lib/vocabData';
+import { type VocabWord, generateBadWords, pick, shuffle } from '@/lib/vocabData';
 
 interface Step06Props {
   words: VocabWord[];
@@ -49,11 +49,25 @@ const Step06VocabShower: React.FC<Step06Props> = ({ words, allWords, onComplete 
   const GOAL_COUNT = 4;
 
   useEffect(() => {
-    const topics: TopicData[] = words.map(w => ({
-      word: w.word,
-      good: w.relatedWords.length >= 4 ? w.relatedWords : [...w.relatedWords, ...w.examples.map(e => e.split(' ')[0]).filter(Boolean)],
-      bad: generateBadWords(w, allWords, 5),
-    }));
+    const topics: TopicData[] = words.map(w => {
+      let goodPool = [...w.relatedWords];
+
+      // If not enough related words, supplement from other words' relatedWords
+      if (goodPool.length < 4) {
+        const supplementPool = allWords
+          .filter(other => other.word !== w.word)
+          .flatMap(other => other.relatedWords)
+          .filter(rw => !goodPool.includes(rw) && rw !== w.word);
+        const needed = 4 - goodPool.length;
+        goodPool = [...goodPool, ...shuffle(supplementPool).slice(0, needed)];
+      }
+
+      return {
+        word: w.word,
+        good: goodPool,
+        bad: generateBadWords(w, allWords, 5),
+      };
+    });
     topicsRef.current = topics;
   }, [words, allWords]);
 

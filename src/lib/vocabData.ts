@@ -4,6 +4,8 @@ import {
   VOCAB_SUBJECTS,
   type VocabCategory,
   type VocabSubject,
+  type VocabStage4Data,
+  type VocabStage5Data,
 } from "@/lib/vocabConstants";
 
 export type { VocabCategory, VocabSubject } from "@/lib/vocabConstants";
@@ -15,17 +17,8 @@ export interface VocabWord {
   meaning: string;
   examples: string[];
   relatedWords: string[];
-  l4: {
-    answer: string;
-    options: string[];
-  };
-  l5: {
-    chunks: string[];
-    targetIndex: number;
-    vocabDistractor: string;
-    hints: string[];
-    fullDistractors: string[];
-  };
+  l4: VocabStage4Data;
+  l5: VocabStage5Data;
   displayOrder: number;
   sourceType: "manual" | "excel" | "bootstrap";
 }
@@ -63,17 +56,8 @@ export interface CreateVocabWordInput {
   meaning: string;
   examples: string[];
   relatedWords: string[];
-  l4: {
-    answer: string;
-    options: string[];
-  };
-  l5: {
-    chunks: string[];
-    targetIndex: number;
-    vocabDistractor: string;
-    hints: string[];
-    fullDistractors: string[];
-  };
+  l4: VocabStage4Data;
+  l5: VocabStage5Data;
   displayOrder?: number;
 }
 
@@ -231,6 +215,90 @@ export async function autoFillVocab(word: string): Promise<{ meaning: string; ex
 
 export async function refreshAllDefinitions(): Promise<{ updatedCount: number }> {
   return api<{ updatedCount: number }>("/api/vocab/refresh-definitions", { method: "POST" });
+}
+
+export interface AiGeneratedVocab {
+  word: string;
+  meaning: string;
+  example: string;
+}
+
+export interface AiGeneratedFullVocab {
+  word: string;
+  meaning: string;
+  example: string;
+  relatedWords: string[];
+}
+
+export async function aiGenerateVocab(words: string[]): Promise<AiGeneratedVocab[]> {
+  return api<AiGeneratedVocab[]>("/api/vocab/ai-generate", {
+    method: "POST",
+    body: JSON.stringify({ words }),
+  });
+}
+
+export async function aiGenerateFullVocab(words: string[]): Promise<AiGeneratedFullVocab[]> {
+  return api<AiGeneratedFullVocab[]>("/api/vocab/ai-generate-full", {
+    method: "POST",
+    body: JSON.stringify({ words }),
+  });
+}
+
+export interface BulkWordInput {
+  word: string;
+  meaning?: string;
+  example?: string;
+  relatedWords?: string[];
+  l4?: { answer: string; options: string[] };
+  l5?: { chunks: string[]; targetIndex: number; vocabDistractor: string; hints: string[]; fullDistractors: string[] };
+}
+
+export async function bulkCreateWords(
+  sessionId: string,
+  words: BulkWordInput[],
+): Promise<{ insertedCount: number; words: VocabWord[] }> {
+  const result = await api<{ insertedCount: number; words: any[] }>("/api/vocab/bulk-words", {
+    method: "POST",
+    body: JSON.stringify({
+      sessionId,
+      words: words.map((w) => ({
+        word: w.word,
+        meaning: w.meaning || "",
+        examples: w.example ? [w.example] : [],
+        relatedWords: w.relatedWords || [],
+        l4: w.l4 || null,
+        l5: w.l5 || null,
+      })),
+    }),
+  });
+
+  invalidateVocabCache();
+  return {
+    insertedCount: result.insertedCount,
+    words: result.words.map(normalizeWord),
+  };
+}
+
+export async function updateVocabWord(
+  wordId: number,
+  input: Partial<Pick<VocabWord, "word" | "meaning" | "examples" | "relatedWords" | "l4" | "l5">>,
+): Promise<VocabWord> {
+  const row = await api<any>(`/api/vocab/words/${wordId}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+  invalidateVocabCache();
+  return normalizeWord(row);
+}
+
+export async function deleteVocabWord(wordId: number): Promise<void> {
+  await api<{ deleted: boolean }>(`/api/vocab/words/${wordId}`, { method: "DELETE" });
+  invalidateVocabCache();
+}
+
+export async function deleteVocabSession(sessionId: string): Promise<void> {
+  await api<{ deleted: boolean }>(`/api/vocab/sessions/${sessionId}`, { method: "DELETE" });
+  invalidateVocabCache();
 }
 
 export function invalidateVocabCache() {
