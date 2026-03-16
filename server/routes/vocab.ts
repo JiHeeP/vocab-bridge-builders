@@ -10,6 +10,7 @@ import {
   refreshDefinitions,
   updateVocabSession,
 } from "../services/vocabService";
+import { generateVocabDefinitions } from "../services/aiGenerationService";
 import { VOCAB_CATEGORIES, VOCAB_SUBJECTS, type VocabCategory, type VocabSubject } from "../../src/lib/vocabConstants";
 
 const router = Router();
@@ -119,14 +120,14 @@ router.post("/words", async (req, res, next) => {
       displayOrder,
     } = req.body ?? {};
 
-    if (!sessionId || !word?.trim() || !meaning?.trim()) {
-      return res.status(400).send("sessionId, word, and meaning are required");
+    if (!sessionId || !word?.trim()) {
+      return res.status(400).send("sessionId and word are required");
     }
 
     const created = await createVocabWord({
       sessionId,
       word,
-      meaning,
+      meaning: meaning?.trim() || "",
       examples: Array.isArray(examples) ? examples : [],
       relatedWords: Array.isArray(relatedWords) ? relatedWords : [],
       l4: {
@@ -177,6 +178,63 @@ router.post("/import", upload.single("file"), async (req, res, next) => {
         originalName: req.file.originalname,
       }),
     );
+  } catch (error) {
+    next(error);
+  }
+});
+
+// AI-powered vocabulary generation (Kimi 2.5)
+router.post("/ai-generate", async (req, res, next) => {
+  try {
+    const { words } = req.body ?? {};
+    if (!Array.isArray(words) || words.length === 0) {
+      return res.status(400).send("words array is required");
+    }
+
+    const cleanWords = words.map((w: unknown) => String(w).trim()).filter(Boolean);
+    if (cleanWords.length === 0) {
+      return res.status(400).send("at least one non-empty word is required");
+    }
+
+    const result = await generateVocabDefinitions(cleanWords);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Bulk word creation: create session + add multiple words at once
+router.post("/bulk-words", async (req, res, next) => {
+  try {
+    const { sessionId, words: wordList } = req.body ?? {};
+
+    if (!sessionId) {
+      return res.status(400).send("sessionId is required");
+    }
+
+    if (!Array.isArray(wordList) || wordList.length === 0) {
+      return res.status(400).send("words array is required");
+    }
+
+    const results = [];
+    for (const item of wordList) {
+      const word = item.word?.trim();
+      if (!word) continue;
+
+      const created = await createVocabWord({
+        sessionId,
+        word,
+        meaning: item.meaning?.trim() || "",
+        examples: Array.isArray(item.examples) ? item.examples.filter(Boolean) : item.example ? [item.example] : [],
+        relatedWords: [],
+        l4: { answer: "", options: [] },
+        l5: { chunks: [], targetIndex: 0, vocabDistractor: "", hints: [], fullDistractors: [] },
+        sourceType: "manual",
+      });
+      results.push(created);
+    }
+
+    res.status(201).json({ insertedCount: results.length, words: results });
   } catch (error) {
     next(error);
   }

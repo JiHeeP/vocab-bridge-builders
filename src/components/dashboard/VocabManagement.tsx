@@ -9,11 +9,14 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  Sparkles,
   Upload,
   XCircle,
 } from "lucide-react";
 import {
-  autoFillVocab,
+  aiGenerateVocab,
+  type AiGeneratedVocab,
+  bulkCreateWords,
   createVocabSession,
   createVocabWord,
   getContentSubjectGroups,
@@ -36,37 +39,17 @@ interface Props {
   onBack: () => void;
 }
 
-interface WordFormState {
+interface BulkWordRow {
   word: string;
   meaning: string;
-  example1: string;
-  example2: string;
-  example3: string;
-  relatedWords: string;
-  l4Answer: string;
-  l4Options: string;
-  l5Chunks: string;
-  l5TargetIndex: string;
-  l5VocabDistractor: string;
-  l5Hints: string;
-  l5FullDistractors: string;
+  example: string;
 }
 
-const emptyWordForm: WordFormState = {
-  word: "",
-  meaning: "",
-  example1: "",
-  example2: "",
-  example3: "",
-  relatedWords: "",
-  l4Answer: "",
-  l4Options: "",
-  l5Chunks: "",
-  l5TargetIndex: "2",
-  l5VocabDistractor: "",
-  l5Hints: "",
-  l5FullDistractors: "",
-};
+const EMPTY_ROWS = 10;
+
+function createEmptyRows(): BulkWordRow[] {
+  return Array.from({ length: EMPTY_ROWS }, () => ({ word: "", meaning: "", example: "" }));
+}
 
 const VocabManagement: React.FC<Props> = ({ onBack }) => {
   const [catalog, setCatalog] = useState<VocabCatalog>({ sessions: [] });
@@ -82,15 +65,18 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
     sessionNo: "",
     label: "",
   });
-  const [wordForm, setWordForm] = useState<WordFormState>(emptyWordForm);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [creatingSession, setCreatingSession] = useState(false);
-  const [creatingWord, setCreatingWord] = useState(false);
   const [importing, setImporting] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(false);
   const [fetchingCurrentImages, setFetchingCurrentImages] = useState(false);
   const [fetchingAllImages, setFetchingAllImages] = useState(false);
   const [refreshingDefs, setRefreshingDefs] = useState(false);
+
+  // Bulk input state
+  const [bulkRows, setBulkRows] = useState<BulkWordRow[]>(createEmptyRows());
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [bulkSaving, setBulkSaving] = useState(false);
 
   const toolSessions = useMemo(() => getToolSessions(catalog), [catalog]);
   const contentGroups = useMemo(() => getContentSubjectGroups(catalog), [catalog]);
@@ -111,6 +97,8 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
   );
 
   const sessionMissingCount = words.filter((word) => !imageWords.has(word.word)).length;
+
+  const filledWordCount = bulkRows.filter((r) => r.word.trim()).length;
 
   useEffect(() => {
     void loadData();
@@ -192,45 +180,6 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
       toast({ title: "세션 생성 실패", description: String(error), variant: "destructive" });
     } finally {
       setCreatingSession(false);
-    }
-  };
-
-  const handleCreateWord = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!selectedSession) {
-      toast({ title: "세션을 먼저 선택하세요", variant: "destructive" });
-      return;
-    }
-
-    setCreatingWord(true);
-    try {
-      await createVocabWord({
-        sessionId: selectedSession.id,
-        word: wordForm.word.trim(),
-        meaning: wordForm.meaning.trim(),
-        examples: [wordForm.example1, wordForm.example2, wordForm.example3].map((item) => item.trim()).filter(Boolean),
-        relatedWords: wordForm.relatedWords.split(",").map((item) => item.trim()).filter(Boolean),
-        l4: {
-          answer: wordForm.l4Answer.trim(),
-          options: wordForm.l4Options.split("/").map((item) => item.trim()).filter(Boolean),
-        },
-        l5: {
-          chunks: wordForm.l5Chunks.split("/").map((item) => item.trim()).filter(Boolean),
-          targetIndex: Number(wordForm.l5TargetIndex),
-          vocabDistractor: wordForm.l5VocabDistractor.trim(),
-          hints: wordForm.l5Hints.split("/").map((item) => item.trim()).filter(Boolean),
-          fullDistractors: wordForm.l5FullDistractors.split(",").map((item) => item.trim()).filter(Boolean),
-        },
-      });
-
-      setWordForm(emptyWordForm);
-      setWords(await getVocabSessionWords(selectedSession.id));
-      setCatalog(await getVocabCatalog(true));
-      toast({ title: "어휘가 추가되었습니다", description: `${selectedSession.label}에 반영되었습니다.` });
-    } catch (error) {
-      toast({ title: "어휘 추가 실패", description: String(error), variant: "destructive" });
-    } finally {
-      setCreatingWord(false);
     }
   };
 
@@ -337,21 +286,6 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
     }
   };
 
-  const handleWordAutoFill = async () => {
-    const word = wordForm.word.trim();
-    if (!word || wordForm.meaning.trim()) return;
-
-    const data = await autoFillVocab(word);
-    if (data) {
-      setWordForm((prev) => ({
-        ...prev,
-        meaning: prev.meaning || data.meaning,
-        example1: prev.example1 || data.examples[0] || "",
-      }));
-      toast({ title: "자동 생성 완료", description: `'${word}'의 뜻과 예문이 자동 입력되었습니다.` });
-    }
-  };
-
   const handleRefreshDefinitions = async () => {
     setRefreshingDefs(true);
     try {
@@ -364,6 +298,87 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
       toast({ title: "업데이트 실패", description: String(error), variant: "destructive" });
     } finally {
       setRefreshingDefs(false);
+    }
+  };
+
+  // Bulk row handlers
+  const handleBulkRowChange = (index: number, field: keyof BulkWordRow, value: string) => {
+    setBulkRows((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  };
+
+  const handleAiGenerate = async () => {
+    const wordsToGenerate = bulkRows
+      .map((r) => r.word.trim())
+      .filter(Boolean);
+
+    if (wordsToGenerate.length === 0) {
+      toast({ title: "어휘를 먼저 입력하세요", variant: "destructive" });
+      return;
+    }
+
+    setAiGenerating(true);
+    try {
+      const generated = await aiGenerateVocab(wordsToGenerate);
+
+      // Map generated results back to rows
+      setBulkRows((prev) => {
+        const next = [...prev];
+        for (const gen of generated) {
+          const rowIndex = next.findIndex(
+            (r) => r.word.trim() === gen.word || r.word.trim() === gen.word.trim(),
+          );
+          if (rowIndex !== -1) {
+            next[rowIndex] = {
+              ...next[rowIndex],
+              meaning: gen.meaning || next[rowIndex].meaning,
+              example: gen.example || next[rowIndex].example,
+            };
+          }
+        }
+        return next;
+      });
+
+      toast({
+        title: "AI 생성 완료",
+        description: `${generated.length}개 어휘의 뜻과 예문이 생성되었습니다.`,
+      });
+    } catch (error) {
+      toast({ title: "AI 생성 실패", description: String(error), variant: "destructive" });
+    } finally {
+      setAiGenerating(false);
+    }
+  };
+
+  const handleBulkSave = async () => {
+    if (!selectedSession) {
+      toast({ title: "세션을 먼저 선택하세요", variant: "destructive" });
+      return;
+    }
+
+    const wordsToSave = bulkRows.filter((r) => r.word.trim());
+    if (wordsToSave.length === 0) {
+      toast({ title: "저장할 어휘가 없습니다", variant: "destructive" });
+      return;
+    }
+
+    setBulkSaving(true);
+    try {
+      const result = await bulkCreateWords(selectedSession.id, wordsToSave);
+      setBulkRows(createEmptyRows());
+      setWords(await getVocabSessionWords(selectedSession.id));
+      setCatalog(await getVocabCatalog(true));
+      toast({
+        title: "어휘 일괄 저장 완료",
+        description: `${result.insertedCount}개 어휘가 추가되었습니다.`,
+      });
+    } catch (error) {
+      toast({ title: "일괄 저장 실패", description: String(error), variant: "destructive" });
+    } finally {
+      setBulkSaving(false);
     }
   };
 
@@ -388,7 +403,7 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
               <BookOpen size={20} className="text-primary" /> 어휘 관리
             </h3>
             <p className="text-sm text-muted-foreground mt-1">
-              세션 생성, 수동 추가, 엑셀 업로드, 이미지 상태 관리를 한 화면에서 처리합니다.
+              세션 생성, 어휘 일괄 입력, AI 자동 생성, 이미지 관리를 한 화면에서 처리합니다.
             </p>
           </div>
           <div className="flex gap-2">
@@ -564,39 +579,82 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
               )}
             </div>
 
+            {/* Bulk Word Input - 10 words at once */}
             <div className="rounded-2xl border border-border p-4">
               <div className="text-sm font-bold text-foreground mb-3 flex items-center gap-2">
-                <Plus size={16} className="text-primary" /> 학습 어휘 수동 추가
+                <Plus size={16} className="text-primary" /> 어휘 일괄 입력 (최대 10개)
               </div>
-              <form onSubmit={handleCreateWord} className="space-y-3">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <input value={wordForm.word} onChange={(event) => setWordForm((prev) => ({ ...prev, word: event.target.value }))} onBlur={() => void handleWordAutoFill()} className="rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="어휘 (입력 후 탭하면 자동 생성)" />
-                  <input value={wordForm.meaning} onChange={(event) => setWordForm((prev) => ({ ...prev, meaning: event.target.value }))} className="rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="뜻" />
+              <p className="text-xs text-muted-foreground mb-3">
+                어휘만 입력하고 <strong>AI 자동 생성</strong> 버튼을 누르면 초등학교 2학년 수준의 뜻과 예문이 자동으로 만들어집니다.
+              </p>
+
+              <div className="space-y-2">
+                {/* Header */}
+                <div className="grid grid-cols-[40px_1fr_1.5fr_2fr] gap-2 text-xs font-bold text-muted-foreground px-1">
+                  <div>#</div>
+                  <div>어휘</div>
+                  <div>뜻 (AI 자동생성)</div>
+                  <div>예문 (AI 자동생성)</div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <input value={wordForm.example1} onChange={(event) => setWordForm((prev) => ({ ...prev, example1: event.target.value }))} className="rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="예문1" />
-                  <input value={wordForm.example2} onChange={(event) => setWordForm((prev) => ({ ...prev, example2: event.target.value }))} className="rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="예문2" />
-                  <input value={wordForm.example3} onChange={(event) => setWordForm((prev) => ({ ...prev, example3: event.target.value }))} className="rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="예문3" />
-                </div>
-                <input value={wordForm.relatedWords} onChange={(event) => setWordForm((prev) => ({ ...prev, relatedWords: event.target.value }))} className="rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="관련어 (쉼표 구분)" />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <input value={wordForm.l4Answer} onChange={(event) => setWordForm((prev) => ({ ...prev, l4Answer: event.target.value }))} className="rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="L4 정답" />
-                  <input value={wordForm.l4Options} onChange={(event) => setWordForm((prev) => ({ ...prev, l4Options: event.target.value }))} className="rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="L4 보기 (/ 구분)" />
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <input value={wordForm.l5Chunks} onChange={(event) => setWordForm((prev) => ({ ...prev, l5Chunks: event.target.value }))} className="rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="L5 chunks (/ 구분)" />
-                  <input value={wordForm.l5TargetIndex} onChange={(event) => setWordForm((prev) => ({ ...prev, l5TargetIndex: event.target.value }))} className="rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="L5 targetIndex" inputMode="numeric" />
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <input value={wordForm.l5VocabDistractor} onChange={(event) => setWordForm((prev) => ({ ...prev, l5VocabDistractor: event.target.value }))} className="rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="L5 vocabDistractor" />
-                  <input value={wordForm.l5Hints} onChange={(event) => setWordForm((prev) => ({ ...prev, l5Hints: event.target.value }))} className="rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="L5 hints (/ 구분)" />
-                </div>
-                <input value={wordForm.l5FullDistractors} onChange={(event) => setWordForm((prev) => ({ ...prev, l5FullDistractors: event.target.value }))} className="rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="L5 fullDistractors (쉼표 구분)" />
-                <button type="submit" disabled={creatingWord || !selectedSession} className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground disabled:opacity-50">
-                  {creatingWord ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
-                  현재 세션에 어휘 추가
+
+                {/* Rows */}
+                {bulkRows.map((row, index) => (
+                  <div key={index} className="grid grid-cols-[40px_1fr_1.5fr_2fr] gap-2 items-center">
+                    <div className="text-xs text-muted-foreground text-center font-bold">{index + 1}</div>
+                    <input
+                      value={row.word}
+                      onChange={(e) => handleBulkRowChange(index, "word", e.target.value)}
+                      className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                      placeholder="어휘 입력"
+                    />
+                    <input
+                      value={row.meaning}
+                      onChange={(e) => handleBulkRowChange(index, "meaning", e.target.value)}
+                      className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                      placeholder="AI가 자동 생성"
+                    />
+                    <input
+                      value={row.example}
+                      onChange={(e) => handleBulkRowChange(index, "example", e.target.value)}
+                      className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                      placeholder="AI가 자동 생성"
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-3 mt-4">
+                <button
+                  onClick={() => void handleAiGenerate()}
+                  disabled={aiGenerating || filledWordCount === 0}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50 hover:from-violet-600 hover:to-purple-700 transition-all"
+                >
+                  {aiGenerating ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                  AI 자동 생성 ({filledWordCount}개)
                 </button>
-              </form>
+
+                <button
+                  onClick={() => void handleBulkSave()}
+                  disabled={bulkSaving || !selectedSession || filledWordCount === 0}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground disabled:opacity-50"
+                >
+                  {bulkSaving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+                  세션에 저장
+                </button>
+
+                <button
+                  onClick={() => setBulkRows(createEmptyRows())}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-bold text-foreground hover:bg-muted"
+                >
+                  초기화
+                </button>
+
+                {filledWordCount > 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    {filledWordCount}개 어휘 입력됨
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="rounded-2xl border border-border p-4">

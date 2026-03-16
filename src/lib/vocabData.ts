@@ -233,6 +233,42 @@ export async function refreshAllDefinitions(): Promise<{ updatedCount: number }>
   return api<{ updatedCount: number }>("/api/vocab/refresh-definitions", { method: "POST" });
 }
 
+export interface AiGeneratedVocab {
+  word: string;
+  meaning: string;
+  example: string;
+}
+
+export async function aiGenerateVocab(words: string[]): Promise<AiGeneratedVocab[]> {
+  return api<AiGeneratedVocab[]>("/api/vocab/ai-generate", {
+    method: "POST",
+    body: JSON.stringify({ words }),
+  });
+}
+
+export async function bulkCreateWords(
+  sessionId: string,
+  words: Array<{ word: string; meaning?: string; example?: string }>,
+): Promise<{ insertedCount: number; words: VocabWord[] }> {
+  const result = await api<{ insertedCount: number; words: any[] }>("/api/vocab/bulk-words", {
+    method: "POST",
+    body: JSON.stringify({
+      sessionId,
+      words: words.map((w) => ({
+        word: w.word,
+        meaning: w.meaning || "",
+        examples: w.example ? [w.example] : [],
+      })),
+    }),
+  });
+
+  invalidateVocabCache();
+  return {
+    insertedCount: result.insertedCount,
+    words: result.words.map(normalizeWord),
+  };
+}
+
 export function invalidateVocabCache() {
   catalogCache = null;
   wordsCache.clear();
