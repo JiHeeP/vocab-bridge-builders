@@ -220,6 +220,19 @@ export async function importVocabSpreadsheet(input: {
   };
 }
 
+export async function autoFillVocab(word: string): Promise<{ meaning: string; examples: string[] } | null> {
+  try {
+    const result = await api<{ meaning: string; examples: string[] }>(`/api/vocab/auto-fill?word=${encodeURIComponent(word)}`);
+    return result.meaning ? result : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function refreshAllDefinitions(): Promise<{ updatedCount: number }> {
+  return api<{ updatedCount: number }>("/api/vocab/refresh-definitions", { method: "POST" });
+}
+
 export function invalidateVocabCache() {
   catalogCache = null;
   wordsCache.clear();

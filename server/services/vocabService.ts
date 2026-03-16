@@ -10,6 +10,7 @@ import {
   type VocabCategory,
   type VocabSubject,
 } from "../../src/lib/vocabConstants";
+import { vocabDictionary } from "../data/vocabDictionary";
 
 export interface VocabStage4Data {
   answer: string;
@@ -787,6 +788,34 @@ export async function importVocabSpreadsheet(input: {
 
     await client.query("COMMIT");
     return { insertedCount, skippedCount, failedRows, createdSessions };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export function getAutoFillData(word: string): { meaning: string; examples: string[] } | null {
+  return vocabDictionary[word] ?? null;
+}
+
+export async function refreshDefinitions(): Promise<{ updatedCount: number }> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    let updatedCount = 0;
+
+    for (const [word, data] of Object.entries(vocabDictionary)) {
+      const result = await client.query(
+        `UPDATE vocab_words SET meaning = $1, examples = $2::jsonb WHERE word = $3`,
+        [data.meaning, JSON.stringify(data.examples), word],
+      );
+      updatedCount += result.rowCount ?? 0;
+    }
+
+    await client.query("COMMIT");
+    return { updatedCount };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
