@@ -78,14 +78,18 @@ const BOOTSTRAP_SESSION_SIZE = 10;
 const CSV_HEADERS = {
   id: "ID",
   word: "표기통일",
+  wordAlt: "어휘",
   meaning: "뜻검수",
+  meaningAlt: "뜻",
   example: "예문",
   // Legacy single-example header (backward compat: read only 예문1)
   example1: "예문1",
   relatedWords: "관련어",
   relatedWords10: "관련어10",
   l4: "L4음절선택",
+  l4Alt: "음절 선택(L4)",
   l5: "L5어절조립",
+  l5Alt: "어절 조립(L5)",
 };
 
 function normalizeHeader(value: string): string {
@@ -166,8 +170,18 @@ function parseCsvLine(line: string): string[] {
 
 function parseRelatedWords(field: string): string[] {
   if (!field) return [];
-  return field
-    .replace(/^"|"$/g, "")
+  const cleaned = field.replace(/^"|"$/g, "").trim();
+
+  // Handle "good:word1/word2 | bad:word3/word4" format — extract only "good" words
+  if (cleaned.startsWith("good:")) {
+    const goodPart = cleaned.split("|")[0]?.replace("good:", "").trim() ?? "";
+    return goodPart
+      .split("/")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return cleaned
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
@@ -239,8 +253,8 @@ function parseCsvText(csvText: string): ParsedCsvWord[] {
 
   return rows.slice(1).flatMap((row) => {
     const fields = parseCsvLine(row);
-    const word = fields[indexByHeader.get(CSV_HEADERS.word) ?? -1]?.trim() ?? "";
-    const meaning = fields[indexByHeader.get(CSV_HEADERS.meaning) ?? -1]?.trim() ?? "";
+    const word = fields[indexByHeader.get(CSV_HEADERS.word) ?? indexByHeader.get(CSV_HEADERS.wordAlt) ?? -1]?.trim() ?? "";
+    const meaning = fields[indexByHeader.get(CSV_HEADERS.meaning) ?? indexByHeader.get(CSV_HEADERS.meaningAlt) ?? -1]?.trim() ?? "";
 
     if (!word || !meaning) {
       return [];
@@ -263,8 +277,8 @@ function parseCsvText(csvText: string): ParsedCsvWord[] {
       "";
 
     // Parse l4/l5: optional - empty if not provided
-    const l4Field = fields[indexByHeader.get(CSV_HEADERS.l4) ?? -1]?.trim() ?? "";
-    const l5Field = fields[indexByHeader.get(CSV_HEADERS.l5) ?? -1]?.trim() ?? "";
+    const l4Field = fields[indexByHeader.get(CSV_HEADERS.l4) ?? indexByHeader.get(CSV_HEADERS.l4Alt) ?? -1]?.trim() ?? "";
+    const l5Field = fields[indexByHeader.get(CSV_HEADERS.l5) ?? indexByHeader.get(CSV_HEADERS.l5Alt) ?? -1]?.trim() ?? "";
 
     return [
       {
@@ -430,6 +444,86 @@ export async function ensureBootstrapVocabData() {
           `,
           [
             word.id,
+            sessionId,
+            word.word,
+            word.meaning,
+            JSON.stringify(word.examples),
+            JSON.stringify(word.relatedWords),
+            JSON.stringify(word.l4),
+            JSON.stringify(word.l5),
+            wordIndex + 1,
+          ],
+        );
+      }
+    }
+
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function ensureContentVocabData() {
+  // Check if 학습내용어/사회 sessions already exist
+  const existing = await pool.query<{ cnt: string }>(
+    `SELECT COUNT(*)::text AS cnt FROM vocab_sessions WHERE category = 'content' AND subject = '사회'`,
+  );
+  if (Number(existing.rows[0]?.cnt ?? 0) > 0) {
+    return;
+  }
+
+  const csvPath = path.resolve(process.cwd(), "public", "data", "vocab_game_materials.csv");
+  let csvText: string;
+  try {
+    csvText = await fs.readFile(csvPath, "utf8");
+  } catch {
+    return;
+  }
+
+  const parsedWords = parseCsvText(csvText);
+  if (parsedWords.length === 0) {
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const usedIds = await getUsedIds(client);
+    const nextIdRef = { value: await getNextWordId(client) };
+
+    for (let start = 0; start < parsedWords.length; start += BOOTSTRAP_SESSION_SIZE) {
+      const sessionWords = parsedWords.slice(start, start + BOOTSTRAP_SESSION_SIZE);
+      const sessionNo = Math.floor(start / BOOTSTRAP_SESSION_SIZE) + 1;
+      const sessionLabel = `${DEFAULT_SESSION_LABEL} ${sessionNo}`;
+
+      const sessionInsert = await client.query<{ id: string }>(
+        `
+          INSERT INTO vocab_sessions (category, subject, session_no, label, is_active)
+          VALUES ('content', '사회', $1, $2, true)
+          RETURNING id
+        `,
+        [sessionNo, sessionLabel],
+      );
+
+      const sessionId = sessionInsert.rows[0].id;
+
+      for (let wordIndex = 0; wordIndex < sessionWords.length; wordIndex += 1) {
+        const word = sessionWords[wordIndex];
+        const id = await resolveWordId(client, word.id, usedIds, nextIdRef);
+        await client.query(
+          `
+            INSERT INTO vocab_words (
+              id, session_id, word, meaning, examples,
+              related_words, l4, l5, display_order, source_type
+            )
+            VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb, $9, 'bootstrap')
+          `,
+          [
+            id,
             sessionId,
             word.word,
             word.meaning,

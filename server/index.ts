@@ -10,7 +10,7 @@ import learningRecordsRouter from "./routes/learningRecords";
 import interventionLogsRouter from "./routes/interventionLogs";
 import wordImagesRouter from "./routes/wordImages";
 import vocabRouter from "./routes/vocab";
-import { ensureBootstrapVocabData } from "./services/vocabService";
+import { ensureBootstrapVocabData, ensureContentVocabData } from "./services/vocabService";
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -51,6 +51,7 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 
 await initializeDatabase();
 await ensureBootstrapVocabData();
+await ensureContentVocabData();
 
 app.listen(port, () => {
   console.log(`Server listening on port ${port}`);
