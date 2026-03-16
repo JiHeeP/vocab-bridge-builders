@@ -10,7 +10,7 @@ import {
   refreshDefinitions,
   updateVocabSession,
 } from "../services/vocabService";
-import { generateVocabDefinitions } from "../services/aiGenerationService";
+import { generateVocabDefinitions, generateFullVocabDefinitions, generateL4Data, generateL5Data } from "../services/aiGenerationService";
 import { VOCAB_CATEGORIES, VOCAB_SUBJECTS, type VocabCategory, type VocabSubject } from "../../src/lib/vocabConstants";
 
 const router = Router();
@@ -204,6 +204,7 @@ router.post("/ai-generate", async (req, res, next) => {
 });
 
 // Bulk word creation: create session + add multiple words at once
+// Accepts full vocab data; auto-generates l4/l5 if missing
 router.post("/bulk-words", async (req, res, next) => {
   try {
     const { sessionId, words: wordList } = req.body ?? {};
@@ -221,20 +222,65 @@ router.post("/bulk-words", async (req, res, next) => {
       const word = item.word?.trim();
       if (!word) continue;
 
+      const examples = Array.isArray(item.examples)
+        ? item.examples.filter(Boolean)
+        : item.example
+          ? [item.example]
+          : [];
+      const relatedWords = Array.isArray(item.relatedWords)
+        ? item.relatedWords.filter(Boolean)
+        : [];
+
+      // Auto-generate l4 if not provided
+      const l4 = item.l4?.answer
+        ? { answer: item.l4.answer, options: Array.isArray(item.l4.options) ? item.l4.options : [] }
+        : generateL4Data(word);
+
+      // Auto-generate l5 if not provided
+      const l5 = item.l5?.chunks?.length > 0
+        ? {
+            chunks: item.l5.chunks,
+            targetIndex: Number(item.l5.targetIndex ?? 0),
+            vocabDistractor: item.l5.vocabDistractor ?? "",
+            hints: Array.isArray(item.l5.hints) ? item.l5.hints : [],
+            fullDistractors: Array.isArray(item.l5.fullDistractors) ? item.l5.fullDistractors : [],
+          }
+        : generateL5Data(word, examples[0] || "", relatedWords);
+
       const created = await createVocabWord({
         sessionId,
         word,
         meaning: item.meaning?.trim() || "",
-        examples: Array.isArray(item.examples) ? item.examples.filter(Boolean) : item.example ? [item.example] : [],
-        relatedWords: [],
-        l4: { answer: "", options: [] },
-        l5: { chunks: [], targetIndex: 0, vocabDistractor: "", hints: [], fullDistractors: [] },
+        examples,
+        relatedWords,
+        l4,
+        l5,
         sourceType: "manual",
       });
       results.push(created);
     }
 
     res.status(201).json({ insertedCount: results.length, words: results });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// AI-powered full vocabulary generation (meaning + example + relatedWords)
+router.post("/ai-generate-full", async (req, res, next) => {
+  try {
+    const { words } = req.body ?? {};
+    if (!Array.isArray(words) || words.length === 0) {
+      return res.status(400).send("words array is required");
+    }
+
+    const cleanWords = words.map((w: unknown) => String(w).trim()).filter(Boolean);
+    if (cleanWords.length === 0) {
+      return res.status(400).send("at least one non-empty word is required");
+    }
+
+    const result = await generateFullVocabDefinitions(cleanWords);
+    res.json(result);
   } catch (error) {
     next(error);
   }

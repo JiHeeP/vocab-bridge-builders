@@ -168,21 +168,21 @@ const Step01Card: React.FC<Step01CardProps> = ({ words, onComplete, onBack }) =>
                 <div className="w-full bg-card p-4 rounded-xl border border-border mb-4 shadow-sm text-center">
                   <p className="text-muted-foreground text-lg leading-snug break-keep">{currentWord.meaning}</p>
                 </div>
-                {currentWord.examples.map((ex, idx) => (
-                  <div key={idx} className="w-full bg-warning/10 p-4 rounded-xl border border-warning/20 shadow-sm mb-3 text-left relative">
+                {currentWord.examples[0] && (
+                  <div className="w-full bg-warning/10 p-4 rounded-xl border border-warning/20 shadow-sm mb-3 text-left relative">
                     <span className="text-xs font-bold text-warning block mb-2 flex items-center gap-1">
-                      <Quote size={12} /> 예문 {idx + 1}
+                      <Quote size={12} /> 예문
                     </span>
                     <p className="text-lg font-medium text-foreground break-keep leading-relaxed"
                       dangerouslySetInnerHTML={{
-                        __html: ex.replace(
+                        __html: currentWord.examples[0].replace(
                           new RegExp(currentWord.word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'),
                           `<span class="text-destructive bg-destructive/10 px-1 rounded font-black">${currentWord.word}</span>`
                         )
                       }}
                     />
                   </div>
-                ))}
+                )}
                 <div className="w-full flex flex-col items-center mb-2">
                   {renderImage('small')}
                   {!wordImage && (

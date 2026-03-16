@@ -11,6 +11,7 @@ import {
   type VocabSubject,
 } from "../../src/lib/vocabConstants";
 import { vocabDictionary } from "../data/vocabDictionary";
+import { generateL4Data, generateL5Data } from "./aiGenerationService";
 
 export interface VocabStage4Data {
   answer: string;
@@ -87,10 +88,13 @@ const CSV_HEADERS = {
   id: "ID",
   word: "표기통일",
   meaning: "뜻검수",
+  example: "예문",
+  // Legacy multi-example headers (backward compat)
   example1: "예문1",
   example2: "예문2",
   example3: "예문3",
-  relatedWords: "관련어10",
+  relatedWords: "관련어",
+  relatedWords10: "관련어10",
   l4: "L4음절선택",
   l5: "L5어절조립",
 };
@@ -244,26 +248,48 @@ function parseCsvText(csvText: string): ParsedCsvWord[] {
   const headers = parseCsvLine(rows[0]).map(normalizeHeader);
   const indexByHeader = new Map(headers.map((header, index) => [header, index]));
 
+  // Detect format: new single-example or legacy multi-example
+  const hasNewExampleHeader = indexByHeader.has(CSV_HEADERS.example);
+  const hasLegacyExampleHeaders = indexByHeader.has(CSV_HEADERS.example1);
+
   return rows.slice(1).flatMap((row) => {
     const fields = parseCsvLine(row);
     const word = fields[indexByHeader.get(CSV_HEADERS.word) ?? -1]?.trim() ?? "";
     const meaning = fields[indexByHeader.get(CSV_HEADERS.meaning) ?? -1]?.trim() ?? "";
-    const l4Field = fields[indexByHeader.get(CSV_HEADERS.l4) ?? -1]?.trim() ?? "";
-    const l5Field = fields[indexByHeader.get(CSV_HEADERS.l5) ?? -1]?.trim() ?? "";
 
-    if (!word || !meaning || !l4Field || !l5Field) {
+    if (!word || !meaning) {
       return [];
     }
 
     const idField = fields[indexByHeader.get(CSV_HEADERS.id) ?? -1]?.trim() ?? "";
     const parsedId = Number.parseInt(idField, 10);
-    const examples = [
-      fields[indexByHeader.get(CSV_HEADERS.example1) ?? -1] ?? "",
-      fields[indexByHeader.get(CSV_HEADERS.example2) ?? -1] ?? "",
-      fields[indexByHeader.get(CSV_HEADERS.example3) ?? -1] ?? "",
-    ]
-      .map((item) => item.trim())
-      .filter(Boolean);
+
+    // Parse examples: support both new (single 예문) and legacy (예문1/2/3) formats
+    let examples: string[];
+    if (hasNewExampleHeader) {
+      const singleExample = fields[indexByHeader.get(CSV_HEADERS.example) ?? -1]?.trim() ?? "";
+      examples = singleExample ? [singleExample] : [];
+    } else if (hasLegacyExampleHeaders) {
+      examples = [
+        fields[indexByHeader.get(CSV_HEADERS.example1) ?? -1] ?? "",
+        fields[indexByHeader.get(CSV_HEADERS.example2) ?? -1] ?? "",
+        fields[indexByHeader.get(CSV_HEADERS.example3) ?? -1] ?? "",
+      ]
+        .map((item) => item.trim())
+        .filter(Boolean);
+    } else {
+      examples = [];
+    }
+
+    // Parse relatedWords: support both "관련어" and legacy "관련어10"
+    const relatedWordsField =
+      fields[indexByHeader.get(CSV_HEADERS.relatedWords) ?? -1]?.trim() ??
+      fields[indexByHeader.get(CSV_HEADERS.relatedWords10) ?? -1]?.trim() ??
+      "";
+
+    // Parse l4/l5: optional - empty if not provided
+    const l4Field = fields[indexByHeader.get(CSV_HEADERS.l4) ?? -1]?.trim() ?? "";
+    const l5Field = fields[indexByHeader.get(CSV_HEADERS.l5) ?? -1]?.trim() ?? "";
 
     return [
       {
@@ -271,9 +297,9 @@ function parseCsvText(csvText: string): ParsedCsvWord[] {
         word,
         meaning,
         examples,
-        relatedWords: parseRelatedWords(fields[indexByHeader.get(CSV_HEADERS.relatedWords) ?? -1] ?? ""),
-        l4: parseL4(l4Field),
-        l5: parseL5(l5Field),
+        relatedWords: parseRelatedWords(relatedWordsField),
+        l4: l4Field ? parseL4(l4Field) : { answer: "", options: [] },
+        l5: l5Field ? parseL5(l5Field) : { chunks: [], targetIndex: 0, vocabDistractor: "", hints: [], fullDistractors: [] },
       },
     ];
   });
@@ -742,8 +768,8 @@ export async function importVocabSpreadsheet(input: {
       const rowNumber = index + 2;
       const normalizedWord = row.word.trim().toLowerCase();
 
-      if (!row.word || !row.meaning || row.examples.length === 0 || !row.l4.answer || row.l4.options.length === 0 || row.l5.chunks.length === 0) {
-        failedRows.push({ rowNumber, reason: "required vocab fields are missing" });
+      if (!row.word || !row.meaning) {
+        failedRows.push({ rowNumber, reason: "단어 또는 뜻이 비어 있습니다" });
         continue;
       }
 
@@ -760,6 +786,11 @@ export async function importVocabSpreadsheet(input: {
           nextSessionNo += 1;
         }
 
+        // Auto-fill l4/l5 if not provided in the CSV
+        const l4 = row.l4.answer ? row.l4 : generateL4Data(row.word);
+        const example = row.examples[0] || "";
+        const l5 = row.l5.chunks.length > 0 ? row.l5 : generateL5Data(row.word, example, row.relatedWords);
+
         await createVocabWord({
           sessionId: currentSession.id,
           preferredId: row.id,
@@ -767,8 +798,8 @@ export async function importVocabSpreadsheet(input: {
           meaning: row.meaning,
           examples: row.examples,
           relatedWords: row.relatedWords,
-          l4: row.l4,
-          l5: row.l5,
+          l4,
+          l5,
           displayOrder: currentSessionWordCount + 1,
           sourceType: "excel",
           client,

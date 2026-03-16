@@ -239,6 +239,13 @@ export interface AiGeneratedVocab {
   example: string;
 }
 
+export interface AiGeneratedFullVocab {
+  word: string;
+  meaning: string;
+  example: string;
+  relatedWords: string[];
+}
+
 export async function aiGenerateVocab(words: string[]): Promise<AiGeneratedVocab[]> {
   return api<AiGeneratedVocab[]>("/api/vocab/ai-generate", {
     method: "POST",
@@ -246,9 +253,25 @@ export async function aiGenerateVocab(words: string[]): Promise<AiGeneratedVocab
   });
 }
 
+export async function aiGenerateFullVocab(words: string[]): Promise<AiGeneratedFullVocab[]> {
+  return api<AiGeneratedFullVocab[]>("/api/vocab/ai-generate-full", {
+    method: "POST",
+    body: JSON.stringify({ words }),
+  });
+}
+
+export interface BulkWordInput {
+  word: string;
+  meaning?: string;
+  example?: string;
+  relatedWords?: string[];
+  l4?: { answer: string; options: string[] };
+  l5?: { chunks: string[]; targetIndex: number; vocabDistractor: string; hints: string[]; fullDistractors: string[] };
+}
+
 export async function bulkCreateWords(
   sessionId: string,
-  words: Array<{ word: string; meaning?: string; example?: string }>,
+  words: BulkWordInput[],
 ): Promise<{ insertedCount: number; words: VocabWord[] }> {
   const result = await api<{ insertedCount: number; words: any[] }>("/api/vocab/bulk-words", {
     method: "POST",
@@ -258,6 +281,9 @@ export async function bulkCreateWords(
         word: w.word,
         meaning: w.meaning || "",
         examples: w.example ? [w.example] : [],
+        relatedWords: w.relatedWords || [],
+        l4: w.l4 || null,
+        l5: w.l5 || null,
       })),
     }),
   });
