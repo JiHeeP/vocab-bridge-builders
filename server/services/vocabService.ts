@@ -80,10 +80,8 @@ const CSV_HEADERS = {
   word: "표기통일",
   meaning: "뜻검수",
   example: "예문",
-  // Legacy multi-example headers (backward compat)
+  // Legacy single-example header (backward compat: read only 예문1)
   example1: "예문1",
-  example2: "예문2",
-  example3: "예문3",
   relatedWords: "관련어",
   relatedWords10: "관련어10",
   l4: "L4음절선택",
