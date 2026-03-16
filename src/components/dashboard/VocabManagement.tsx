@@ -13,6 +13,7 @@ import {
   XCircle,
 } from "lucide-react";
 import {
+  autoFillVocab,
   createVocabSession,
   createVocabWord,
   getContentSubjectGroups,
@@ -21,6 +22,7 @@ import {
   getVocabCatalog,
   getVocabSessionWords,
   importVocabSpreadsheet,
+  refreshAllDefinitions,
   updateVocabSession,
   type VocabCatalog,
   type VocabSession,
@@ -88,17 +90,20 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
   const [sessionLoading, setSessionLoading] = useState(false);
   const [fetchingCurrentImages, setFetchingCurrentImages] = useState(false);
   const [fetchingAllImages, setFetchingAllImages] = useState(false);
+  const [refreshingDefs, setRefreshingDefs] = useState(false);
 
   const toolSessions = useMemo(() => getToolSessions(catalog), [catalog]);
   const contentGroups = useMemo(() => getContentSubjectGroups(catalog), [catalog]);
 
   const visibleSessions = useMemo(() => {
     if (selectedCategory === "tool") {
-      return toolSessions;
+      return catalog.sessions.filter((s) => s.category === "tool");
     }
 
-    return contentGroups.find((group) => group.subject === selectedSubject)?.sessions ?? [];
-  }, [contentGroups, selectedCategory, selectedSubject, toolSessions]);
+    return catalog.sessions.filter(
+      (s) => s.category === "content" && s.subject === selectedSubject,
+    );
+  }, [catalog, selectedCategory, selectedSubject]);
 
   const selectedSession = useMemo(
     () => visibleSessions.find((session) => session.id === selectedSessionId) ?? null,
@@ -113,12 +118,12 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
 
   useEffect(() => {
     if (selectedCategory === "content" && !selectedSubject) {
-      setSelectedSubject(contentGroups[0]?.subject ?? null);
+      setSelectedSubject(VOCAB_SUBJECTS[0]);
     }
     if (selectedCategory === "tool") {
       setSelectedSubject(null);
     }
-  }, [contentGroups, selectedCategory, selectedSubject]);
+  }, [selectedCategory, selectedSubject]);
 
   useEffect(() => {
     if (!visibleSessions.length) {
@@ -332,6 +337,36 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
     }
   };
 
+  const handleWordAutoFill = async () => {
+    const word = wordForm.word.trim();
+    if (!word || wordForm.meaning.trim()) return;
+
+    const data = await autoFillVocab(word);
+    if (data) {
+      setWordForm((prev) => ({
+        ...prev,
+        meaning: prev.meaning || data.meaning,
+        example1: prev.example1 || data.examples[0] || "",
+      }));
+      toast({ title: "자동 생성 완료", description: `'${word}'의 뜻과 예문이 자동 입력되었습니다.` });
+    }
+  };
+
+  const handleRefreshDefinitions = async () => {
+    setRefreshingDefs(true);
+    try {
+      const result = await refreshAllDefinitions();
+      if (selectedSessionId) {
+        setWords(await getVocabSessionWords(selectedSessionId));
+      }
+      toast({ title: "뜻/예문 업데이트 완료", description: `${result.updatedCount}개 어휘가 초2 수준으로 업데이트되었습니다.` });
+    } catch (error) {
+      toast({ title: "업데이트 실패", description: String(error), variant: "destructive" });
+    } finally {
+      setRefreshingDefs(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -373,6 +408,14 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
               {fetchingAllImages ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
               전체 이미지 수집
             </button>
+            <button
+              onClick={() => void handleRefreshDefinitions()}
+              disabled={refreshingDefs}
+              className="flex items-center gap-2 text-sm font-bold px-4 py-2 rounded-xl border border-primary text-primary hover:bg-primary/5"
+            >
+              {refreshingDefs ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+              초2 뜻/예문 업데이트
+            </button>
           </div>
         </div>
 
@@ -402,9 +445,9 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                   onChange={(event) => setSelectedSubject(event.target.value as VocabSubject)}
                   className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
                 >
-                  {contentGroups.map((group) => (
-                    <option key={group.subject} value={group.subject}>
-                      {group.subject}
+                  {VOCAB_SUBJECTS.map((subject) => (
+                    <option key={subject} value={subject}>
+                      {subject}
                     </option>
                   ))}
                 </select>
@@ -527,7 +570,7 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
               </div>
               <form onSubmit={handleCreateWord} className="space-y-3">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <input value={wordForm.word} onChange={(event) => setWordForm((prev) => ({ ...prev, word: event.target.value }))} className="rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="어휘" />
+                  <input value={wordForm.word} onChange={(event) => setWordForm((prev) => ({ ...prev, word: event.target.value }))} onBlur={() => void handleWordAutoFill()} className="rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="어휘 (입력 후 탭하면 자동 생성)" />
                   <input value={wordForm.meaning} onChange={(event) => setWordForm((prev) => ({ ...prev, meaning: event.target.value }))} className="rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="뜻" />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

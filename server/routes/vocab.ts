@@ -3,9 +3,11 @@ import multer from "multer";
 import {
   createVocabSession,
   createVocabWord,
+  getAutoFillData,
   getVocabCatalog,
   getVocabSessionWords,
   importVocabSpreadsheet,
+  refreshDefinitions,
   updateVocabSession,
 } from "../services/vocabService";
 import { VOCAB_CATEGORIES, VOCAB_SUBJECTS, type VocabCategory, type VocabSubject } from "../../src/lib/vocabConstants";
@@ -77,6 +79,28 @@ router.patch("/sessions/:sessionId", async (req, res, next) => {
     res.json(
       await updateVocabSession(req.params.sessionId, { isActive: req.body.isActive }),
     );
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/auto-fill", async (req, res, next) => {
+  try {
+    const word = typeof req.query.word === "string" ? req.query.word.trim() : "";
+    if (!word) {
+      return res.status(400).send("word parameter is required");
+    }
+    const result = getAutoFillData(word);
+    res.json(result ?? { meaning: "", examples: [] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/refresh-definitions", async (req, res, next) => {
+  try {
+    const result = await refreshDefinitions();
+    res.json(result);
   } catch (error) {
     next(error);
   }

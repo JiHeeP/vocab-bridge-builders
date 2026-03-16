@@ -19,6 +19,9 @@ import ContentManagementTab from '@/components/dashboard/ContentManagementTab';
 
 const DashboardPage = () => {
   const navigate = useNavigate();
+  const [authenticated, setAuthenticated] = useState(false);
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState(false);
   const [students, setStudents] = useState<StudentData[]>([]);
   const [records, setRecords] = useState<LearningRecord[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<StudentData | null>(null);
@@ -26,8 +29,8 @@ const DashboardPage = () => {
   const [dateRange, setDateRange] = useState<'week' | 'month' | 'all'>('all');
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (authenticated) loadData();
+  }, [authenticated]);
 
   const loadData = async () => {
     const [studentsRes, recordsRes] = await Promise.all([
@@ -73,6 +76,41 @@ const DashboardPage = () => {
   };
 
   const handlePrint = () => window.print();
+
+  if (!authenticated) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center font-body">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (pin === '490800') {
+              setAuthenticated(true);
+            } else {
+              setPinError(true);
+            }
+          }}
+          className="bg-card border border-border rounded-2xl p-8 w-80 space-y-4 text-center"
+        >
+          <h2 className="text-xl font-bold font-display text-foreground">교사 대시보드</h2>
+          <p className="text-sm text-muted-foreground">PIN 번호를 입력해 주세요</p>
+          <input
+            type="password"
+            value={pin}
+            onChange={(e) => { setPin(e.target.value); setPinError(false); }}
+            className="w-full rounded-xl border border-border bg-background px-4 py-3 text-center text-lg tracking-widest"
+            placeholder="••••••"
+            inputMode="numeric"
+            maxLength={6}
+            autoFocus
+          />
+          {pinError && <p className="text-destructive text-sm">PIN이 올바르지 않습니다</p>}
+          <button type="submit" className="w-full bg-primary text-primary-foreground rounded-xl py-3 font-bold">
+            입장하기
+          </button>
+        </form>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
