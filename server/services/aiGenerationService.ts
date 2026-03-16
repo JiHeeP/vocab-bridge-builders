@@ -18,18 +18,9 @@ export interface FullGeneratedVocab {
   relatedWords: string[];
 }
 
-export interface VocabStage4Data {
-  answer: string;
-  options: string[];
-}
+import { type VocabStage4Data, type VocabStage5Data } from "../../src/lib/vocabConstants";
 
-export interface VocabStage5Data {
-  chunks: string[];
-  targetIndex: number;
-  vocabDistractor: string;
-  hints: string[];
-  fullDistractors: string[];
-}
+export type { VocabStage4Data, VocabStage5Data };
 
 const KIMI_API_URL = "https://api.moonshot.cn/v1/chat/completions";
 const KIMI_MODEL = "kimi-k2";
@@ -40,6 +31,50 @@ function getApiKey(): string {
     throw new Error("KIMI_API_KEY 또는 MOONSHOT_API_KEY 환경변수가 설정되지 않았습니다.");
   }
   return key;
+}
+
+async function fetchWithTimeoutAndRetry(
+  url: string,
+  options: RequestInit,
+  timeoutMs = 30000,
+  maxRetries = 1,
+): Promise<Response> {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timer);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Kimi API 호출 실패 (${response.status}): ${errorText}`);
+      }
+      return response;
+    } catch (error) {
+      clearTimeout(timer);
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attempt < maxRetries) continue;
+    }
+  }
+  throw lastError ?? new Error("AI API 호출 실패");
+}
+
+function validateFullVocab(item: FullGeneratedVocab, originalWord: string): FullGeneratedVocab {
+  const meaning = item.meaning || `${originalWord}의 뜻`;
+
+  let example = item.example;
+  if (example && !example.includes(originalWord)) {
+    example = `${originalWord}을(를) 사용해요.`;
+  }
+
+  const relatedWords = [...item.relatedWords];
+  const fillerWords = ["비슷한말", "반대말", "관련있는말", "연관어"];
+  while (relatedWords.length < 4) {
+    relatedWords.push(fillerWords[relatedWords.length % fillerWords.length]);
+  }
+
+  return { word: item.word, meaning, example, relatedWords };
 }
 
 export async function generateVocabDefinitions(words: string[]): Promise<GeneratedVocab[]> {
@@ -62,7 +97,7 @@ ${wordList}
 응답 형식 (JSON 배열만 출력):
 [{"word":"어휘1","meaning":"쉬운 뜻","example":"예문"},{"word":"어휘2","meaning":"쉬운 뜻","example":"예문"}]`;
 
-  const response = await fetch(KIMI_API_URL, {
+  const response = await fetchWithTimeoutAndRetry(KIMI_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -80,11 +115,6 @@ ${wordList}
       max_tokens: 4096,
     }),
   });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Kimi API 호출 실패 (${response.status}): ${errorText}`);
-  }
 
   const data = (await response.json()) as {
     choices: Array<{ message: { content: string } }>;
@@ -141,7 +171,7 @@ ${wordList}
 응답 형식 (JSON 배열만 출력):
 [{"word":"어휘","meaning":"쉬운 뜻","example":"예문","relatedWords":["관련어1","관련어2","관련어3","관련어4"]}]`;
 
-  const response = await fetch(KIMI_API_URL, {
+  const response = await fetchWithTimeoutAndRetry(KIMI_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -154,11 +184,6 @@ ${wordList}
       max_tokens: 8192,
     }),
   });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Kimi API 호출 실패 (${response.status}): ${errorText}`);
-  }
 
   const data = (await response.json()) as {
     choices: Array<{ message: { content: string } }>;
@@ -180,14 +205,14 @@ ${wordList}
     if (!Array.isArray(parsed)) {
       throw new Error("응답이 배열이 아닙니다.");
     }
-    return parsed.map((item) => ({
-      word: String(item.word ?? ""),
+    return parsed.map((item, idx) => validateFullVocab({
+      word: String(item.word ?? words[idx] ?? ""),
       meaning: String(item.meaning ?? ""),
       example: String(item.example ?? ""),
       relatedWords: Array.isArray(item.relatedWords)
         ? item.relatedWords.map(String)
         : [],
-    }));
+    }, words[idx] ?? String(item.word ?? "")));
   } catch (parseError) {
     throw new Error(`AI 응답 파싱 실패: ${parseError instanceof Error ? parseError.message : String(parseError)}\n원본: ${content.slice(0, 500)}`);
   }

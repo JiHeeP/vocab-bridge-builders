@@ -9,22 +9,13 @@ import {
   VOCAB_SUBJECTS,
   type VocabCategory,
   type VocabSubject,
+  type VocabStage4Data,
+  type VocabStage5Data,
 } from "../../src/lib/vocabConstants";
 import { vocabDictionary } from "../data/vocabDictionary";
 import { generateL4Data, generateL5Data } from "./aiGenerationService";
 
-export interface VocabStage4Data {
-  answer: string;
-  options: string[];
-}
-
-export interface VocabStage5Data {
-  chunks: string[];
-  targetIndex: number;
-  vocabDistractor: string;
-  hints: string[];
-  fullDistractors: string[];
-}
+export type { VocabStage4Data, VocabStage5Data };
 
 export interface VocabWordRecord {
   id: number;
@@ -248,10 +239,6 @@ function parseCsvText(csvText: string): ParsedCsvWord[] {
   const headers = parseCsvLine(rows[0]).map(normalizeHeader);
   const indexByHeader = new Map(headers.map((header, index) => [header, index]));
 
-  // Detect format: new single-example or legacy multi-example
-  const hasNewExampleHeader = indexByHeader.has(CSV_HEADERS.example);
-  const hasLegacyExampleHeaders = indexByHeader.has(CSV_HEADERS.example1);
-
   return rows.slice(1).flatMap((row) => {
     const fields = parseCsvLine(row);
     const word = fields[indexByHeader.get(CSV_HEADERS.word) ?? -1]?.trim() ?? "";
@@ -264,22 +251,12 @@ function parseCsvText(csvText: string): ParsedCsvWord[] {
     const idField = fields[indexByHeader.get(CSV_HEADERS.id) ?? -1]?.trim() ?? "";
     const parsedId = Number.parseInt(idField, 10);
 
-    // Parse examples: support both new (single 예문) and legacy (예문1/2/3) formats
-    let examples: string[];
-    if (hasNewExampleHeader) {
-      const singleExample = fields[indexByHeader.get(CSV_HEADERS.example) ?? -1]?.trim() ?? "";
-      examples = singleExample ? [singleExample] : [];
-    } else if (hasLegacyExampleHeaders) {
-      examples = [
-        fields[indexByHeader.get(CSV_HEADERS.example1) ?? -1] ?? "",
-        fields[indexByHeader.get(CSV_HEADERS.example2) ?? -1] ?? "",
-        fields[indexByHeader.get(CSV_HEADERS.example3) ?? -1] ?? "",
-      ]
-        .map((item) => item.trim())
-        .filter(Boolean);
-    } else {
-      examples = [];
-    }
+    // Parse examples: new format (예문) or legacy fallback (예문1 only), max 1
+    const singleExample = fields[indexByHeader.get(CSV_HEADERS.example) ?? -1]?.trim() ?? "";
+    const legacyExample = !singleExample
+      ? (fields[indexByHeader.get(CSV_HEADERS.example1) ?? -1]?.trim() ?? "")
+      : "";
+    const examples = (singleExample || legacyExample) ? [singleExample || legacyExample] : [];
 
     // Parse relatedWords: support both "관련어" and legacy "관련어10"
     const relatedWordsField =
@@ -305,7 +282,7 @@ function parseCsvText(csvText: string): ParsedCsvWord[] {
   });
 }
 
-function mapWordRow(row: {
+export function mapWordRow(row: {
   id: number;
   session_id: string;
   word: string;
@@ -596,7 +573,7 @@ export async function createVocabWord(input: CreateWordInput): Promise<VocabWord
       await client.query("BEGIN");
     }
 
-    const examples = input.examples.map((item) => item.trim()).filter(Boolean);
+    const examples = input.examples.map((item) => item.trim()).filter(Boolean).slice(0, 1);
     const relatedWords = input.relatedWords.map((item) => item.trim()).filter(Boolean);
     const displayOrder = input.displayOrder ?? (await getNextDisplayOrder(client, input.sessionId));
     const usedIds = input.usedIds ?? (await getUsedIds(client));
@@ -840,7 +817,7 @@ export async function refreshDefinitions(): Promise<{ updatedCount: number }> {
     for (const [word, data] of Object.entries(vocabDictionary)) {
       const result = await client.query(
         `UPDATE vocab_words SET meaning = $1, examples = $2::jsonb WHERE word = $3`,
-        [data.meaning, JSON.stringify(data.examples), word],
+        [data.meaning, JSON.stringify(data.examples.slice(0, 1)), word],
       );
       updatedCount += result.rowCount ?? 0;
     }

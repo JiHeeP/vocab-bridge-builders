@@ -10,3 +10,16 @@ export const VOCAB_CATEGORY_LABELS: Record<VocabCategory, string> = {
 };
 
 export const DEFAULT_SESSION_LABEL = "세션";
+
+export interface VocabStage4Data {
+  answer: string;
+  options: string[];
+}
+
+export interface VocabStage5Data {
+  chunks: string[];
+  targetIndex: number;
+  vocabDistractor: string;
+  hints: string[];
+  fullDistractors: string[];
+}

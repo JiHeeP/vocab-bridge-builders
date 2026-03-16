@@ -10,6 +10,7 @@ import {
   Plus,
   RefreshCw,
   Sparkles,
+  Trash2,
   Upload,
   XCircle,
 } from "lucide-react";
@@ -19,6 +20,8 @@ import {
   bulkCreateWords,
   createVocabSession,
   createVocabWord,
+  deleteVocabSession,
+  deleteVocabWord,
   getContentSubjectGroups,
   getSessionDisplayName,
   getToolSessions,
@@ -107,6 +110,8 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
   const [fetchingCurrentImages, setFetchingCurrentImages] = useState(false);
   const [fetchingAllImages, setFetchingAllImages] = useState(false);
   const [refreshingDefs, setRefreshingDefs] = useState(false);
+
+  const [expandedWordId, setExpandedWordId] = useState<number | null>(null);
 
   // Bulk input state
   const [bulkRows, setBulkRows] = useState<BulkWordRow[]>(createEmptyRows());
@@ -336,6 +341,33 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
     }
   };
 
+  const handleDeleteWord = async (wordId: number) => {
+    if (!confirm("이 어휘를 삭제하시겠습니까?")) return;
+    try {
+      await deleteVocabWord(wordId);
+      setWords(prev => prev.filter(w => w.id !== wordId));
+      setCatalog(await getVocabCatalog(true));
+      toast({ title: "어휘가 삭제되었습니다" });
+    } catch (error) {
+      toast({ title: "삭제 실패", description: String(error), variant: "destructive" });
+    }
+  };
+
+  const handleDeleteSession = async (session: VocabSession) => {
+    if (!confirm(`"${session.label}" 세션과 포함된 모든 어휘를 삭제하시겠습니까?`)) return;
+    try {
+      await deleteVocabSession(session.id);
+      setCatalog(await getVocabCatalog(true));
+      if (selectedSessionId === session.id) {
+        setSelectedSessionId("");
+        setWords([]);
+      }
+      toast({ title: "세션이 삭제되었습니다" });
+    } catch (error) {
+      toast({ title: "삭제 실패", description: String(error), variant: "destructive" });
+    }
+  };
+
   // Bulk row handlers
   const handleBulkRowChange = (index: number, field: keyof BulkWordRow, value: string) => {
     setBulkRows((prev) => {
@@ -546,12 +578,20 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                       >
                         {session.isActive ? "활성" : "비활성"}
                       </span>
-                      <button
-                        onClick={() => void handleToggleSession(session)}
-                        className="text-xs font-bold text-primary hover:underline"
-                      >
-                        {session.isActive ? "비활성화" : "활성화"}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => void handleToggleSession(session)}
+                          className="text-xs font-bold text-primary hover:underline"
+                        >
+                          {session.isActive ? "비활성화" : "활성화"}
+                        </button>
+                        <button
+                          onClick={() => void handleDeleteSession(session)}
+                          className="text-xs font-bold text-destructive hover:underline"
+                        >
+                          삭제
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -761,21 +801,26 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
           <div className="font-bold text-foreground">세션 어휘 목록</div>
           {sessionLoading && <Loader2 size={16} className="animate-spin text-primary" />}
         </div>
-        <div className="grid grid-cols-[80px_140px_1fr_160px_100px] text-sm">
+        <div className="grid grid-cols-[60px_120px_1fr_80px_80px] text-sm">
           <div className="bg-muted px-4 py-3 font-bold text-muted-foreground border-b border-border">순서</div>
           <div className="bg-muted px-4 py-3 font-bold text-muted-foreground border-b border-border">어휘</div>
           <div className="bg-muted px-4 py-3 font-bold text-muted-foreground border-b border-border">뜻</div>
-          <div className="bg-muted px-4 py-3 font-bold text-muted-foreground border-b border-border">세션</div>
           <div className="bg-muted px-4 py-3 font-bold text-muted-foreground border-b border-border text-center">이미지</div>
+          <div className="bg-muted px-4 py-3 font-bold text-muted-foreground border-b border-border text-center">작업</div>
 
           {words.map((word) => {
             const hasImage = imageWords.has(word.word);
+            const isExpanded = expandedWordId === word.id;
             return (
               <React.Fragment key={word.id}>
                 <div className="px-4 py-2.5 border-b border-border/50 text-muted-foreground">{word.displayOrder}</div>
-                <div className="px-4 py-2.5 border-b border-border/50 font-bold text-foreground">{word.word}</div>
+                <div
+                  className="px-4 py-2.5 border-b border-border/50 font-bold text-foreground cursor-pointer hover:text-primary"
+                  onClick={() => setExpandedWordId(isExpanded ? null : word.id)}
+                >
+                  {word.word} <span className="text-xs text-muted-foreground">{isExpanded ? "▲" : "▼"}</span>
+                </div>
                 <div className="px-4 py-2.5 border-b border-border/50 text-foreground text-xs leading-relaxed">{word.meaning}</div>
-                <div className="px-4 py-2.5 border-b border-border/50 text-xs text-muted-foreground">{selectedSession?.label ?? "-"}</div>
                 <div className="px-4 py-2.5 border-b border-border/50 text-center">
                   {hasImage ? (
                     <CheckCircle size={16} className="text-success inline" />
@@ -783,6 +828,20 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                     <XCircle size={16} className="text-muted-foreground inline" />
                   )}
                 </div>
+                <div className="px-4 py-2.5 border-b border-border/50 text-center">
+                  <button onClick={() => void handleDeleteWord(word.id)} className="text-destructive hover:underline text-xs font-bold">
+                    <Trash2 size={14} className="inline" />
+                  </button>
+                </div>
+
+                {isExpanded && (
+                  <div className="col-span-5 bg-muted/30 px-6 py-4 border-b border-border/50 text-xs space-y-2">
+                    <div><strong>예문:</strong> {word.examples[0] || "(없음)"}</div>
+                    <div><strong>관련어:</strong> {word.relatedWords.join(", ") || "(없음)"}</div>
+                    <div><strong>L4 (음절선택):</strong> 정답: {word.l4.answer}, 보기: {word.l4.options.join(", ")}</div>
+                    <div><strong>L5 (어절조립):</strong> {word.l5.chunks.join(" / ") || "(없음)"}</div>
+                  </div>
+                )}
               </React.Fragment>
             );
           })}

@@ -4,6 +4,8 @@ import {
   VOCAB_SUBJECTS,
   type VocabCategory,
   type VocabSubject,
+  type VocabStage4Data,
+  type VocabStage5Data,
 } from "@/lib/vocabConstants";
 
 export type { VocabCategory, VocabSubject } from "@/lib/vocabConstants";
@@ -15,17 +17,8 @@ export interface VocabWord {
   meaning: string;
   examples: string[];
   relatedWords: string[];
-  l4: {
-    answer: string;
-    options: string[];
-  };
-  l5: {
-    chunks: string[];
-    targetIndex: number;
-    vocabDistractor: string;
-    hints: string[];
-    fullDistractors: string[];
-  };
+  l4: VocabStage4Data;
+  l5: VocabStage5Data;
   displayOrder: number;
   sourceType: "manual" | "excel" | "bootstrap";
 }
@@ -63,17 +56,8 @@ export interface CreateVocabWordInput {
   meaning: string;
   examples: string[];
   relatedWords: string[];
-  l4: {
-    answer: string;
-    options: string[];
-  };
-  l5: {
-    chunks: string[];
-    targetIndex: number;
-    vocabDistractor: string;
-    hints: string[];
-    fullDistractors: string[];
-  };
+  l4: VocabStage4Data;
+  l5: VocabStage5Data;
   displayOrder?: number;
 }
 
@@ -293,6 +277,28 @@ export async function bulkCreateWords(
     insertedCount: result.insertedCount,
     words: result.words.map(normalizeWord),
   };
+}
+
+export async function updateVocabWord(
+  wordId: number,
+  input: Partial<Pick<VocabWord, "word" | "meaning" | "examples" | "relatedWords" | "l4" | "l5">>,
+): Promise<VocabWord> {
+  const row = await api<any>(`/api/vocab/words/${wordId}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+  invalidateVocabCache();
+  return normalizeWord(row);
+}
+
+export async function deleteVocabWord(wordId: number): Promise<void> {
+  await api<{ deleted: boolean }>(`/api/vocab/words/${wordId}`, { method: "DELETE" });
+  invalidateVocabCache();
+}
+
+export async function deleteVocabSession(sessionId: string): Promise<void> {
+  await api<{ deleted: boolean }>(`/api/vocab/sessions/${sessionId}`, { method: "DELETE" });
+  invalidateVocabCache();
 }
 
 export function invalidateVocabCache() {

@@ -16,7 +16,19 @@ interface Step03Props {
 }
 
 function buildOptions(word: VocabWord, allWords: VocabWord[]): Option[] {
-  const goodWords = pick(word.relatedWords, REQUIRED_COUNT);
+  let goodPool = [...word.relatedWords];
+
+  // Supplement if fewer than REQUIRED_COUNT related words
+  if (goodPool.length < REQUIRED_COUNT) {
+    const supplementPool = allWords
+      .filter(w => w.word !== word.word)
+      .flatMap(w => w.relatedWords)
+      .filter(rw => !goodPool.includes(rw) && rw !== word.word);
+    const needed = REQUIRED_COUNT - goodPool.length;
+    goodPool = [...goodPool, ...shuffle(supplementPool).slice(0, needed)];
+  }
+
+  const goodWords = pick(goodPool, REQUIRED_COUNT);
   const badWords = generateBadWords(word, allWords, REQUIRED_COUNT);
   const good = goodWords.map((text, idx) => ({ id: `g-${word.word}-${idx}`, text, isGood: true }));
   const bad = badWords.map((text, idx) => ({ id: `b-${word.word}-${idx}`, text, isGood: false }));
@@ -47,7 +59,7 @@ const Step03RelatedWords: React.FC<Step03Props> = ({ words, allWords, onComplete
     setOptions(buildOptions(words[index], allWords));
     setSelectedMap({}); setLockedMap({}); setHintUsed(false); setRetryUsed(false);
     setRoundState('playing'); setPendingResult(null);
-    setFeedback({ type: 'info', msg: '관련된 단어 4개를 고르세요.' });
+    setFeedback({ type: 'info', msg: `관련된 단어를 고르세요.` });
     wordStartRef.current = Date.now();
   }, [index, words, allWords]);
 
@@ -56,7 +68,7 @@ const Step03RelatedWords: React.FC<Step03Props> = ({ words, allWords, onComplete
   const toggleOption = (option: Option) => {
     if (roundState !== 'playing' || lockedMap[option.id]) return;
     const isSelected = !!selectedMap[option.id];
-    if (!isSelected && selectedCount >= REQUIRED_COUNT) { setFeedback({ type: 'error', msg: '최대 4개까지만 선택할 수 있어요.' }); return; }
+    if (!isSelected && selectedCount >= actualGoodCount) { setFeedback({ type: 'error', msg: `최대 ${actualGoodCount}개까지만 선택할 수 있어요.` }); return; }
     setSelectedMap(prev => ({ ...prev, [option.id]: !isSelected }));
   };
 
@@ -84,12 +96,14 @@ const Step03RelatedWords: React.FC<Step03Props> = ({ words, allWords, onComplete
     setRoundState('resolved');
   };
 
+  const actualGoodCount = useMemo(() => options.filter(o => o.isGood).length, [options]);
+
   const handleCheck = () => {
-    if (roundState !== 'playing' || selectedCount !== REQUIRED_COUNT) {
-      setFeedback({ type: 'error', msg: '정확히 4개를 선택한 뒤 채점하세요.' }); return;
+    if (roundState !== 'playing' || selectedCount !== actualGoodCount) {
+      setFeedback({ type: 'error', msg: `정확히 ${actualGoodCount}개를 선택한 뒤 채점하세요.` }); return;
     }
     const selected = options.filter(o => selectedMap[o.id]);
-    const isCorrect = selected.length === REQUIRED_COUNT && selected.every(o => o.isGood);
+    const isCorrect = selected.length === actualGoodCount && selected.every(o => o.isGood);
     if (isCorrect) {
       const score = hintUsed ? 1 : 2;
       setFeedback({ type: 'success', msg: `정답입니다! 이번 문제 ${score}점` });
@@ -150,7 +164,7 @@ const Step03RelatedWords: React.FC<Step03Props> = ({ words, allWords, onComplete
         <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
           <div>
             <h1 className="text-lg font-black text-foreground">어휘의 징검다리 - Step 3</h1>
-            <p className="text-xs text-muted-foreground">관련어 4개 고르기</p>
+            <p className="text-xs text-muted-foreground">관련어 고르기</p>
           </div>
           <div className="text-right">
             <div className="text-sm font-bold text-foreground">{index + 1} / {words.length}</div>
@@ -181,7 +195,7 @@ const Step03RelatedWords: React.FC<Step03Props> = ({ words, allWords, onComplete
               );
             })}
           </div>
-          <div className="mt-5 text-xs text-muted-foreground">선택: <b>{selectedCount}</b> / {REQUIRED_COUNT}</div>
+          <div className="mt-5 text-xs text-muted-foreground">선택: <b>{selectedCount}</b> / {actualGoodCount}</div>
         </section>
 
         <section className="bg-card border border-border rounded-3xl p-5 mb-5">
