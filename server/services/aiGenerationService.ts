@@ -155,11 +155,58 @@ ${wordList}
 /**
  * Generate full vocabulary data including related words using AI.
  */
+const FALLBACK_LEXICON: Record<string, { meaning: string; example: string; related: string[] }> = {
+  "영토": {
+    meaning: "나라가 다스리는 땅을 말해요.",
+    example: "독도는 우리나라의 소중한 영토예요.",
+    related: ["나라", "땅", "국경", "지역", "독도", "국토"],
+  },
+  "행정 구역": {
+    meaning: "나라를 나누어 관리하는 구역이에요.",
+    example: "서울은 우리나라의 행정 구역 중 하나예요.",
+    related: ["시", "도", "군", "구", "주소", "지역"],
+  },
+  "행정구역": {
+    meaning: "나라를 나누어 관리하는 구역이에요.",
+    example: "서울은 우리나라의 행정구역 중 하나예요.",
+    related: ["시", "도", "군", "구", "주소", "지역"],
+  },
+  "근거": {
+    meaning: "어떤 말을 뒷받침하는 이유나 자료예요.",
+    example: "내 생각을 말할 때는 근거를 함께 말해요.",
+    related: ["이유", "자료", "증거", "설명", "주장", "사실"],
+  },
+  "역사": {
+    meaning: "옛날부터 지금까지 있었던 일을 말해요.",
+    example: "우리는 박물관에서 우리나라 역사를 배웠어요.",
+    related: ["옛날", "기록", "유물", "시대", "박물관", "나라"],
+  },
+  "문헌": {
+    meaning: "옛날 일이나 사실을 적어 놓은 글이나 책이에요.",
+    example: "문헌을 보면 옛날 생활 모습을 알 수 있어요.",
+    related: ["기록", "자료", "책", "글", "역사", "도서관"],
+  },
+  "지도": {
+    meaning: "땅의 모습과 위치를 나타낸 그림이에요.",
+    example: "지도를 보면 우리나라의 위치를 쉽게 알 수 있어요.",
+    related: ["위치", "방향", "나라", "지역", "기호", "축척"],
+  },
+  "관리": {
+    meaning: "맡은 일을 살피고 잘 돌보는 것을 말해요.",
+    example: "우리는 교실을 깨끗하게 관리해요.",
+    related: ["점검", "정리", "돌봄", "책임", "유지", "담당"],
+  },
+};
+
 export function generateFallbackFullVocabDefinitions(words: string[]): FullGeneratedVocab[] {
-  return words.map((word) => {
-    const meaning = `${word}의 뜻을 교사가 직접 확인해 주세요.`;
-    const example = `${word}를(을) 문장에 넣어 말해 보아요.`;
-    const relatedWords = ["관련어1", "관련어2", "관련어3", "관련어4"];
+  return words.map((rawWord) => {
+    const word = rawWord.trim();
+    const lex = FALLBACK_LEXICON[word];
+
+    const meaning = lex?.meaning ?? `${word}과(와) 관련된 개념이나 대상을 나타내는 말이에요.`;
+    const example = lex?.example ?? `${word}이라는 말을 활용해 짧은 문장을 만들어 보아요.`;
+    const relatedWords = lex?.related ?? [word, "의미", "예문", "연습", "학습", "국어"];
+
     return {
       word,
       meaning,
