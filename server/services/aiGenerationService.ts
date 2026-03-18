@@ -33,6 +33,25 @@ function getCandidateModels(): string[] {
   return DEFAULT_KIMI_MODELS;
 }
 
+export async function checkKimiAuth() {
+  const apiKey = getApiKey();
+  const response = await fetch("https://api.moonshot.cn/v1/models", {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+  });
+
+  const text = await response.text();
+  return {
+    ok: response.ok,
+    status: response.status,
+    body: text.slice(0, 500),
+    modelsTried: getCandidateModels(),
+    keyPresent: Boolean(apiKey),
+  };
+}
+
 function getApiKey(): string {
   const key = process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY;
   if (!key) {

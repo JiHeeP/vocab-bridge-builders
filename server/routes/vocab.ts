@@ -13,6 +13,7 @@ import {
 } from "../services/vocabService";
 import { pool } from "../db";
 import {
+  checkKimiAuth,
   generateVocabDefinitions,
   generateFullVocabDefinitions,
   generateFallbackFullVocabDefinitions,
@@ -359,6 +360,17 @@ router.post("/bulk-words", async (req, res, next) => {
     }
   } catch (error) {
     next(error);
+  }
+});
+
+// Quick auth check for Kimi/Moonshot API
+router.get("/ai-auth-check", async (_req, res, next) => {
+  try {
+    const result = await checkKimiAuth();
+    return res.status(result.ok ? 200 : 401).json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return res.status(500).json({ ok: false, status: 500, error: message });
   }
 });
 
