@@ -24,7 +24,7 @@ import { type VocabStage4Data, type VocabStage5Data } from "../../src/lib/vocabC
 
 export type { VocabStage4Data, VocabStage5Data };
 
-const KIMI_API_URL = "https://api.moonshot.cn/v1/chat/completions";
+const DEFAULT_KIMI_BASES = ["https://api.moonshot.cn/v1", "https://api.moonshot.ai/v1"];
 const DEFAULT_KIMI_MODELS = ["kimi-k2", "moonshot-v1-8k"];
 
 function getCandidateModels(): string[] {
@@ -35,29 +35,65 @@ function getCandidateModels(): string[] {
 
 export async function checkKimiAuth() {
   const apiKey = getApiKey();
-  const response = await fetch("https://api.moonshot.cn/v1/models", {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-  });
+  const bases = getCandidateApiBases();
+  let last: { ok: boolean; status: number; body: string; base: string } | null = null;
 
-  const text = await response.text();
+  for (const base of bases) {
+    const response = await fetch(`${base}/models`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
+
+    const text = await response.text();
+    last = { ok: response.ok, status: response.status, body: text.slice(0, 500), base };
+    if (response.ok) {
+      return {
+        ok: true,
+        status: response.status,
+        body: text.slice(0, 500),
+        base,
+        modelsTried: getCandidateModels(),
+        keyPresent: Boolean(apiKey),
+        keyPreview: `${apiKey.slice(0, 6)}...(${apiKey.length})`,
+      };
+    }
+  }
+
   return {
-    ok: response.ok,
-    status: response.status,
-    body: text.slice(0, 500),
+    ok: false,
+    status: last?.status ?? 500,
+    body: last?.body ?? "",
+    base: last?.base ?? bases[0],
     modelsTried: getCandidateModels(),
     keyPresent: Boolean(apiKey),
+    keyPreview: `${apiKey.slice(0, 6)}...(${apiKey.length})`,
   };
 }
 
+function normalizeSecret(value: string): string {
+  return value.trim().replace(/^"|"$/g, "").replace(/^'|'$/g, "");
+}
+
 function getApiKey(): string {
-  const key = process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY;
-  if (!key) {
+  const raw = process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY;
+  if (!raw) {
     throw new Error("KIMI_API_KEY 또는 MOONSHOT_API_KEY 환경변수가 설정되지 않았습니다.");
   }
+  const key = normalizeSecret(raw);
+  if (!key) {
+    throw new Error("KIMI API 키가 비어 있습니다.");
+  }
   return key;
+}
+
+function getCandidateApiBases(): string[] {
+  const envBase = process.env.KIMI_BASE_URL?.trim() || process.env.MOONSHOT_BASE_URL?.trim();
+  if (!envBase) return DEFAULT_KIMI_BASES;
+
+  const normalized = envBase.endsWith("/v1") ? envBase : `${envBase.replace(/\/$/, "")}/v1`;
+  return [normalized, ...DEFAULT_KIMI_BASES.filter((b) => b !== normalized)];
 }
 
 async function fetchWithTimeoutAndRetry(
@@ -89,33 +125,36 @@ async function fetchWithTimeoutAndRetry(
 
 async function requestKimiCompletion(apiKey: string, prompt: string, maxTokens: number) {
   const models = getCandidateModels();
+  const bases = getCandidateApiBases();
   let lastError: Error | null = null;
 
-  for (const model of models) {
-    try {
-      const response = await fetchWithTimeoutAndRetry(KIMI_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0.7,
-          max_tokens: maxTokens,
-        }),
-      });
+  for (const base of bases) {
+    for (const model of models) {
+      try {
+        const response = await fetchWithTimeoutAndRetry(`${base}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.7,
+            max_tokens: maxTokens,
+          }),
+        });
 
-      const data = (await response.json()) as { choices: Array<{ message: { content: string } }> };
-      const content = data.choices?.[0]?.message?.content?.trim();
-      if (!content) {
-        throw new Error(`Kimi API(${model})에서 빈 응답을 받았습니다.`);
+        const data = (await response.json()) as { choices: Array<{ message: { content: string } }> };
+        const content = data.choices?.[0]?.message?.content?.trim();
+        if (!content) {
+          throw new Error(`Kimi API(${base}, ${model})에서 빈 응답을 받았습니다.`);
+        }
+        return content;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        continue;
       }
-      return content;
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-      continue;
     }
   }
 
