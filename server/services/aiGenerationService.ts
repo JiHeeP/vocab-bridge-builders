@@ -25,7 +25,13 @@ import { type VocabStage4Data, type VocabStage5Data } from "../../src/lib/vocabC
 export type { VocabStage4Data, VocabStage5Data };
 
 const KIMI_API_URL = "https://api.moonshot.cn/v1/chat/completions";
-const KIMI_MODEL = "kimi-k2";
+const DEFAULT_KIMI_MODELS = ["kimi-k2", "moonshot-v1-8k"];
+
+function getCandidateModels(): string[] {
+  const envModel = process.env.KIMI_MODEL?.trim() || process.env.MOONSHOT_MODEL?.trim();
+  if (envModel) return [envModel, ...DEFAULT_KIMI_MODELS.filter((m) => m !== envModel)];
+  return DEFAULT_KIMI_MODELS;
+}
 
 function getApiKey(): string {
   const key = process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY;
@@ -60,6 +66,41 @@ async function fetchWithTimeoutAndRetry(
     }
   }
   throw lastError ?? new Error("AI API 호출 실패");
+}
+
+async function requestKimiCompletion(apiKey: string, prompt: string, maxTokens: number) {
+  const models = getCandidateModels();
+  let lastError: Error | null = null;
+
+  for (const model of models) {
+    try {
+      const response = await fetchWithTimeoutAndRetry(KIMI_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.7,
+          max_tokens: maxTokens,
+        }),
+      });
+
+      const data = (await response.json()) as { choices: Array<{ message: { content: string } }> };
+      const content = data.choices?.[0]?.message?.content?.trim();
+      if (!content) {
+        throw new Error(`Kimi API(${model})에서 빈 응답을 받았습니다.`);
+      }
+      return content;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      continue;
+    }
+  }
+
+  throw lastError ?? new Error("Kimi API 호출 실패");
 }
 
 function validateFullVocab(item: FullGeneratedVocab, originalWord: string): FullGeneratedVocab {
@@ -102,33 +143,7 @@ ${wordList}
 응답 형식 (JSON 배열만 출력):
 [{"word":"어휘1","meaning":"쉬운 뜻","example":"예문"},{"word":"어휘2","meaning":"쉬운 뜻","example":"예문"}]`;
 
-  const response = await fetchWithTimeoutAndRetry(KIMI_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: KIMI_MODEL,
-      messages: [
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-      temperature: 0.7,
-      max_tokens: 4096,
-    }),
-  });
-
-  const data = (await response.json()) as {
-    choices: Array<{ message: { content: string } }>;
-  };
-
-  const content = data.choices?.[0]?.message?.content?.trim();
-  if (!content) {
-    throw new Error("Kimi API에서 빈 응답을 받았습니다.");
-  }
+  const content = await requestKimiCompletion(apiKey, prompt, 4096);
 
   // Extract JSON from potential markdown code blocks
   let jsonStr = content;
@@ -276,28 +291,7 @@ export async function generateFullVocabDefinitions(words: string[]): Promise<Ful
 [어휘 목록]
 ${wordList}`;
 
-  const response = await fetchWithTimeoutAndRetry(KIMI_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: KIMI_MODEL,
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.7,
-      max_tokens: 8192,
-    }),
-  });
-
-  const data = (await response.json()) as {
-    choices: Array<{ message: { content: string } }>;
-  };
-
-  const content = data.choices?.[0]?.message?.content?.trim();
-  if (!content) {
-    throw new Error("Kimi API에서 빈 응답을 받았습니다.");
-  }
+  const content = await requestKimiCompletion(apiKey, prompt, 8192);
 
   let jsonStr = content;
   const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
