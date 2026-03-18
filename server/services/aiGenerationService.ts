@@ -155,6 +155,22 @@ ${wordList}
 /**
  * Generate full vocabulary data including related words using AI.
  */
+export function generateFallbackFullVocabDefinitions(words: string[]): FullGeneratedVocab[] {
+  return words.map((word) => {
+    const meaning = `${word}의 뜻을 교사가 직접 확인해 주세요.`;
+    const example = `${word}를(을) 문장에 넣어 말해 보아요.`;
+    const relatedWords = ["관련어1", "관련어2", "관련어3", "관련어4"];
+    return {
+      word,
+      meaning,
+      example,
+      relatedWords,
+      l4: generateL4Data(word),
+      l5: generateL5Data(word, example, relatedWords),
+    };
+  });
+}
+
 export async function generateFullVocabDefinitions(words: string[]): Promise<FullGeneratedVocab[]> {
   if (words.length === 0) return [];
 

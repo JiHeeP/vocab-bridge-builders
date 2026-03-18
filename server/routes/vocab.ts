@@ -12,7 +12,13 @@ import {
   updateVocabSession,
 } from "../services/vocabService";
 import { pool } from "../db";
-import { generateVocabDefinitions, generateFullVocabDefinitions, generateL4Data, generateL5Data } from "../services/aiGenerationService";
+import {
+  generateVocabDefinitions,
+  generateFullVocabDefinitions,
+  generateFallbackFullVocabDefinitions,
+  generateL4Data,
+  generateL5Data,
+} from "../services/aiGenerationService";
 import { VOCAB_CATEGORIES, VOCAB_SUBJECTS, type VocabCategory, type VocabSubject } from "../../src/lib/vocabConstants";
 
 const router = Router();
@@ -369,8 +375,16 @@ router.post("/ai-generate-full", async (req, res, next) => {
       return res.status(400).send("at least one non-empty word is required");
     }
 
-    const result = await generateFullVocabDefinitions(cleanWords);
-    res.json(result);
+    try {
+      const result = await generateFullVocabDefinitions(cleanWords);
+      return res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("AI generation failed, falling back:", message);
+      const fallback = generateFallbackFullVocabDefinitions(cleanWords);
+      res.setHeader("X-AI-Fallback", "1");
+      return res.status(200).json(fallback);
+    }
   } catch (error) {
     next(error);
   }
