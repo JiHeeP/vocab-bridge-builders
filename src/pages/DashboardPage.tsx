@@ -137,7 +137,7 @@ const DashboardPage = () => {
         </button>
       </header>
 
-      <main className="max-w-5xl mx-auto p-6">
+      <main className="mx-auto w-full max-w-[1500px] p-4 sm:p-6">
         <Tabs defaultValue="content" className="print:block">
           <TabsList className="mb-6 print:hidden">
             <TabsTrigger value="content" className="flex items-center gap-2"><Settings size={16} /> 콘텐츠 관리</TabsTrigger>
