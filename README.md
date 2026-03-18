@@ -9,18 +9,26 @@ React + Vite frontend with an Express server and Railway PostgreSQL backend.
 npm install
 ```
 
-2. Fill in `.env`.
+2. Create `.env` from `.env.example` and fill values.
+```sh
+cp .env.example .env
+```
 ```env
 DATABASE_URL=postgresql://...
 UNSPLASH_ACCESS_KEY=...
 ```
 
-3. Run the API server.
+3. Verify env + DB connectivity.
+```sh
+npm run doctor
+```
+
+4. Run the API server.
 ```sh
 npm run start
 ```
 
-4. Run the frontend dev server in another terminal.
+5. Run the frontend dev server in another terminal.
 ```sh
 npm run dev
 ```

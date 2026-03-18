@@ -1,12 +1,9 @@
 import { Pool, types } from "pg";
+import { loadConfig } from "./config";
 
 types.setTypeParser(1700, (value) => Number(value));
 
-const databaseUrl = process.env.DATABASE_URL;
-
-if (!databaseUrl) {
-  throw new Error("DATABASE_URL is not set");
-}
+const { databaseUrl } = loadConfig();
 
 const databaseHost = (() => {
   try {

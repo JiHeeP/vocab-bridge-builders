@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { initializeDatabase } from "./db";
+import { loadConfig } from "./config";
 import studentsRouter from "./routes/students";
 import learningRecordsRouter from "./routes/learningRecords";
 import interventionLogsRouter from "./routes/interventionLogs";
@@ -13,7 +14,7 @@ import vocabRouter from "./routes/vocab";
 import { ensureBootstrapVocabData } from "./services/vocabService";
 
 const app = express();
-const port = Number(process.env.PORT || 3000);
+const { port } = loadConfig();
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const distDir = path.join(rootDir, "dist");
 const indexPath = path.join(distDir, "index.html");
