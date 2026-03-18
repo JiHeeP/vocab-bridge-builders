@@ -743,21 +743,21 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
         <ArrowLeft size={16} /> 돌아가기
       </button>
 
-      <section className="bg-card border border-border rounded-2xl p-6">
-        <div className="flex items-center justify-between gap-4 mb-6">
+      <section className="overflow-hidden rounded-[28px] border border-border bg-card p-4 shadow-sm sm:p-6">
+        <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div>
-            <h3 className="text-xl font-bold text-foreground flex items-center gap-2">
+            <h3 className="flex items-center gap-2 text-xl font-bold text-foreground sm:text-2xl">
               <BookOpen size={20} className="text-primary" /> 어휘 관리
             </h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                세션 생성, 어휘 일괄 입력, AI 자동 생성, 이미지 관리를 한 화면에서 처리합니다.
-              </p>
-            </div>
-          <div className="flex flex-wrap gap-2 justify-end">
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+              세션 생성, 어휘 입력, AI 자동 생성, 이미지 수집 상태를 한 번에 정리할 수 있도록 화면 구조를 다시 정돈했습니다.
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 xl:min-w-[420px]">
             <button
               onClick={() => void handleFetchCurrentImages()}
               disabled={fetchingCurrentImages || !selectedSession || sessionMissingCount === 0}
-              className="min-w-[180px] flex items-center justify-center gap-2 text-sm font-bold px-4 py-2 rounded-xl bg-primary text-primary-foreground disabled:opacity-50"
+              className="flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-2 text-sm font-bold text-primary-foreground shadow-sm transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {fetchingCurrentImages ? <Loader2 size={16} className="animate-spin" /> : <ImageDown size={16} />}
               현재 세션 이미지 수집
@@ -765,7 +765,7 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
             <button
               onClick={() => void handleFetchAllImages()}
               disabled={fetchingAllImages}
-              className="min-w-[180px] flex items-center justify-center gap-2 text-sm font-bold px-4 py-2 rounded-xl border border-border text-foreground hover:bg-muted"
+              className="flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-border bg-background px-4 py-2 text-sm font-bold text-foreground transition hover:bg-muted"
             >
               {fetchingAllImages ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
               전체 이미지 수집
@@ -773,7 +773,7 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
             <button
               onClick={() => void handleRefreshDefinitions()}
               disabled={refreshingDefs}
-              className="min-w-[180px] flex items-center justify-center gap-2 text-sm font-bold px-4 py-2 rounded-xl border border-primary text-primary hover:bg-primary/5"
+              className="flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-primary bg-primary/5 px-4 py-2 text-sm font-bold text-primary transition hover:bg-primary/10 sm:col-span-2"
             >
               {refreshingDefs ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
               AI 생성 기준 업데이트
@@ -781,11 +781,11 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
           </div>
         </div>
 
-        <div className="mb-6 grid gap-3 md:grid-cols-3">
-          <div className="rounded-2xl border border-border bg-muted/20 p-4">
-            <div className="text-xs font-bold text-primary">레벨 3</div>
-            <div className="mt-1 text-sm font-semibold text-foreground">관련어 10개까지 AI 생성</div>
-            <div className="mt-1 text-xs text-muted-foreground">랜덤 4개를 뽑아도 정답이 되도록 good 풀 중심으로 채웁니다.</div>
+        <div className="mb-6 grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
+          <div className="rounded-2xl border border-border bg-gradient-to-br from-primary/10 via-primary/5 to-background p-4">
+            <div className="text-xs font-bold text-primary">현재 상태</div>
+            <div className="mt-1 text-2xl font-bold text-foreground">{catalog.sessions.length}</div>
+            <div className="mt-1 text-xs text-muted-foreground">등록된 전체 세션 수</div>
           </div>
           <div className="rounded-2xl border border-border bg-muted/20 p-4">
             <div className="text-xs font-bold text-primary">레벨 4</div>
@@ -797,11 +797,21 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
             <div className="mt-1 text-sm font-semibold text-foreground">4어절 문장 조립 재료 생성</div>
             <div className="mt-1 text-xs text-muted-foreground">목적어 위치, 힌트, 어절 교란 카드까지 한 번에 생성합니다.</div>
           </div>
+          <div className="rounded-2xl border border-border bg-muted/20 p-4">
+            <div className="text-xs font-bold text-primary">이미지 준비</div>
+            <div className="mt-1 text-sm font-semibold text-foreground">
+              {selectedSession ? `${Math.max(words.length - sessionMissingCount, 0)} / ${words.length}` : "세션 선택 필요"}
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {selectedSession ? `현재 선택 세션 기준 이미지 미보유 ${sessionMissingCount}개` : "세션을 선택하면 이미지 준비 상태가 표시됩니다."}
+            </div>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">
-          <div className="space-y-6">
-            <div className="rounded-2xl border border-border p-4">
+        <div className="space-y-6">
+          <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+            <div className="space-y-6">
+              <div className="rounded-3xl border border-border bg-background/70 p-5">
               <div className="text-sm font-bold text-foreground mb-3">세션 필터</div>
               <div className="grid grid-cols-2 gap-2 mb-3">
                 {(["tool", "content"] as VocabCategory[]).map((category) => (
@@ -832,18 +842,18 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                   ))}
                 </select>
               )}
-            </div>
+              </div>
 
-            <div className="rounded-2xl border border-border p-4">
+              <div className="rounded-3xl border border-border bg-background/70 p-5">
               <div className="text-sm font-bold text-foreground mb-3 flex items-center gap-2">
                 <Layers3 size={16} className="text-primary" /> 세션 목록
               </div>
-              <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+              <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
                 {visibleSessions.map((session) => (
                   <div
                     key={session.id}
-                    className={`rounded-2xl border p-3 transition-all ${
-                      selectedSessionId === session.id ? "border-primary bg-primary/5" : "border-border"
+                    className={`rounded-2xl border p-4 transition-all ${
+                      selectedSessionId === session.id ? "border-primary bg-primary/5 shadow-sm" : "border-border bg-card/60"
                     }`}
                   >
                     <button onClick={() => setSelectedSessionId(session.id)} className="w-full text-left">
@@ -884,10 +894,11 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                 )}
               </div>
             </div>
-          </div>
+            </div>
 
-          <div className="space-y-6">
-            <div className="rounded-2xl border border-border p-4">
+            <div className="grid gap-6">
+              <div className="grid gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(280px,0.9fr)]">
+                <div className="rounded-3xl border border-border bg-background/70 p-5">
               <div className="text-sm font-bold text-foreground mb-3 flex items-center gap-2">
                 <Plus size={16} className="text-primary" /> 세션 생성
               </div>
@@ -937,26 +948,40 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
               <div className="mt-3 text-xs text-muted-foreground">
                 추천 세션 번호: <button type="button" onClick={() => setSessionForm((prev) => ({ ...prev, sessionNo: String(suggestedSessionNo) }))} className="font-bold text-primary hover:underline">{suggestedSessionNo}</button>
               </div>
-            </div>
+                </div>
 
-            <div className="rounded-2xl border border-border p-4">
+                <div className="rounded-3xl border border-border bg-background/70 p-5">
               <div className="text-sm font-bold text-foreground mb-3 flex items-center gap-2">
                 <FolderKanban size={16} className="text-primary" /> 현재 선택 세션
               </div>
               {selectedSession ? (
-                <div className="text-sm text-foreground">
-                  <div className="font-bold">{getSessionDisplayName(selectedSession)}</div>
-                  <div className="text-muted-foreground mt-1">
+                <div className="space-y-3 text-sm text-foreground">
+                  <div>
+                    <div className="font-bold">{getSessionDisplayName(selectedSession)}</div>
+                    <div className="mt-1 text-muted-foreground">
                     {selectedSession.wordCount}개 어휘 · 이미지 미보유 {sessionMissingCount}개
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-2xl border border-border bg-card/70 p-3">
+                      <div className="text-xs font-semibold text-muted-foreground">세션 상태</div>
+                      <div className="mt-1 font-bold text-foreground">{selectedSession.isActive ? "활성" : "비활성"}</div>
+                    </div>
+                    <div className="rounded-2xl border border-border bg-card/70 p-3">
+                      <div className="text-xs font-semibold text-muted-foreground">분류</div>
+                      <div className="mt-1 font-bold text-foreground">
+                        {selectedSession.category === "tool" ? VOCAB_CATEGORY_LABELS.tool : `${VOCAB_CATEGORY_LABELS.content} · ${selectedSession.subject}`}
+                      </div>
+                    </div>
                   </div>
                 </div>
               ) : (
                 <div className="text-sm text-muted-foreground">세션을 선택하지 않아도 저장 시 새 세션을 만들 수 있습니다.</div>
               )}
-            </div>
+                </div>
+              </div>
 
-            {/* Bulk Word Input - 10 words at once */}
-            <div className="rounded-2xl border border-border p-4">
+              <div className="rounded-3xl border border-border bg-background/70 p-5">
               <div className="text-sm font-bold text-foreground mb-3 flex items-center gap-2">
                 <Plus size={16} className="text-primary" /> 어휘 일괄 입력 (최대 10개)
               </div>
@@ -965,9 +990,8 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                 이제 AI가 레벨 3 관련어, 레벨 4 음절선택, 레벨 5 어절조립까지 함께 채워 줍니다. 필요하면 직접 수정도 가능합니다.
               </p>
 
-              <div className="space-y-2 overflow-x-auto">
-                {/* Header */}
-                <div className="grid grid-cols-[32px_0.7fr_1fr_1.2fr_0.8fr_0.8fr_0.8fr] gap-1.5 text-xs font-bold text-muted-foreground px-1 min-w-[900px]">
+              <div className="space-y-3 rounded-2xl border border-border bg-card/60 p-3 sm:p-4">
+                <div className="hidden xl:grid xl:grid-cols-[40px_minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] xl:gap-2 xl:px-1 xl:text-xs xl:font-bold xl:text-muted-foreground">
                   <div>#</div>
                   <div>어휘</div>
                   <div>뜻</div>
@@ -977,50 +1001,86 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                   <div>어절조립 (L5)</div>
                 </div>
 
-                {/* Rows */}
                 {bulkRows.map((row, index) => (
-                  <div key={index} className="space-y-1 min-w-[900px]">
-                    <div className="grid grid-cols-[32px_0.7fr_1fr_1.2fr_0.8fr_0.8fr_0.8fr] gap-1.5 items-center">
-                    <div className="text-xs text-muted-foreground text-center font-bold">{index + 1}</div>
-                    <input
-                      value={row.word}
-                      onChange={(e) => handleBulkRowChange(index, "word", e.target.value)}
-                      className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-                      placeholder="어휘 입력"
-                    />
-                    <input
-                      value={row.meaning}
-                      onChange={(e) => handleBulkRowChange(index, "meaning", e.target.value)}
-                      className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-                      placeholder="AI 자동생성"
-                    />
-                    <input
-                      value={row.example}
-                      onChange={(e) => handleBulkRowChange(index, "example", e.target.value)}
-                      className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-                      placeholder="AI 자동생성"
-                    />
-                    <input
-                      value={row.relatedWords}
-                      onChange={(e) => handleBulkRowChange(index, "relatedWords", e.target.value)}
-                      className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-                      placeholder="AI 자동생성"
-                    />
-                    <input
-                      value={row.l4}
-                      onChange={(e) => handleBulkRowChange(index, "l4", e.target.value)}
-                      className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-                      placeholder="자동생성"
-                    />
-                    <input
-                      value={row.l5}
-                      onChange={(e) => handleBulkRowChange(index, "l5", e.target.value)}
-                      className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-                      placeholder="자동생성"
-                    />
+                  <div key={index} className="rounded-2xl border border-border/80 bg-background/80 p-3 shadow-sm xl:border-0 xl:bg-transparent xl:p-0 xl:shadow-none">
+                    <div className="mb-3 flex items-center justify-between xl:hidden">
+                      <div className="text-sm font-bold text-foreground">행 {index + 1}</div>
+                      <div className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">
+                        {row.word.trim() ? "입력 중" : "비어 있음"}
+                      </div>
                     </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[40px_minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] xl:gap-2">
+                      <div className="hidden xl:flex xl:min-h-11 xl:items-center xl:justify-center xl:rounded-xl xl:bg-muted/60 xl:px-2 xl:text-xs xl:font-bold xl:text-muted-foreground">
+                        {index + 1}
+                      </div>
+
+                      <label className="space-y-1.5">
+                        <span className="text-[11px] font-semibold text-muted-foreground xl:hidden">어휘</span>
+                        <input
+                          value={row.word}
+                          onChange={(e) => handleBulkRowChange(index, "word", e.target.value)}
+                          className="min-h-11 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                          placeholder="어휘 입력"
+                        />
+                        {bulkRowErrors[index]?.word && <span className="block text-[11px] text-destructive">{bulkRowErrors[index]?.word}</span>}
+                      </label>
+
+                      <label className="space-y-1.5">
+                        <span className="text-[11px] font-semibold text-muted-foreground xl:hidden">뜻</span>
+                        <input
+                          value={row.meaning}
+                          onChange={(e) => handleBulkRowChange(index, "meaning", e.target.value)}
+                          className="min-h-11 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-muted-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                          placeholder="AI 자동생성"
+                        />
+                        {bulkRowErrors[index]?.meaning && <span className="block text-[11px] text-destructive">{bulkRowErrors[index]?.meaning}</span>}
+                      </label>
+
+                      <label className="space-y-1.5 sm:col-span-2 xl:col-span-1">
+                        <span className="text-[11px] font-semibold text-muted-foreground xl:hidden">예문</span>
+                        <input
+                          value={row.example}
+                          onChange={(e) => handleBulkRowChange(index, "example", e.target.value)}
+                          className="min-h-11 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-muted-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                          placeholder="AI 자동생성"
+                        />
+                        {bulkRowErrors[index]?.example && <span className="block text-[11px] text-destructive">{bulkRowErrors[index]?.example}</span>}
+                      </label>
+
+                      <label className="space-y-1.5">
+                        <span className="text-[11px] font-semibold text-muted-foreground xl:hidden">관련어</span>
+                        <input
+                          value={row.relatedWords}
+                          onChange={(e) => handleBulkRowChange(index, "relatedWords", e.target.value)}
+                          className="min-h-11 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-muted-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                          placeholder="AI 자동생성"
+                        />
+                      </label>
+
+                      <label className="space-y-1.5">
+                        <span className="text-[11px] font-semibold text-muted-foreground xl:hidden">음절선택 (L4)</span>
+                        <input
+                          value={row.l4}
+                          onChange={(e) => handleBulkRowChange(index, "l4", e.target.value)}
+                          className="min-h-11 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-muted-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                          placeholder="자동생성"
+                        />
+                      </label>
+
+                      <label className="space-y-1.5">
+                        <span className="text-[11px] font-semibold text-muted-foreground xl:hidden">어절조립 (L5)</span>
+                        <input
+                          value={row.l5}
+                          onChange={(e) => handleBulkRowChange(index, "l5", e.target.value)}
+                          className="min-h-11 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-muted-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                          placeholder="자동생성"
+                        />
+                      </label>
+                    </div>
+
                     {(bulkRowErrors[index]?.word || bulkRowErrors[index]?.meaning || bulkRowErrors[index]?.example) && (
-                      <div className="grid grid-cols-[32px_0.7fr_1fr_1.2fr_0.8fr_0.8fr_0.8fr] gap-1.5 text-[11px] text-destructive px-1">
+                      <div className="mt-2 hidden xl:grid xl:grid-cols-[40px_minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] xl:gap-2 xl:px-1 xl:text-[11px] xl:text-destructive">
                         <div />
                         <div>{bulkRowErrors[index]?.word}</div>
                         <div>{bulkRowErrors[index]?.meaning}</div>
@@ -1034,7 +1094,7 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                 ))}
               </div>
 
-              <div className="flex items-center gap-3 mt-4">
+              <div className="mt-4 flex flex-wrap items-center gap-3">
                 <button
                   onClick={() => void handleAiGenerate()}
                   disabled={aiGenerating || filledWordCount === 0}
@@ -1095,9 +1155,9 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                   </div>
                 </div>
               )}
-            </div>
+              </div>
 
-            <div className="rounded-2xl border border-border p-4">
+              <div className="rounded-3xl border border-border bg-background/70 p-5">
               <div className="text-sm font-bold text-foreground mb-3 flex items-center gap-2">
                 <Upload size={16} className="text-primary" /> 엑셀/CSV 업로드
               </div>
@@ -1156,6 +1216,7 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                   </div>
                 </div>
               )}
+              </div>
             </div>
           </div>
         </div>
@@ -1176,8 +1237,8 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
         </section>
       )}
 
-      <section className="bg-card border border-border rounded-2xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+      <section className="overflow-hidden rounded-[28px] border border-border bg-card shadow-sm">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div className="font-bold text-foreground">세션 어휘 목록</div>
           {sessionLoading && <Loader2 size={16} className="animate-spin text-primary" />}
         </div>
@@ -1189,7 +1250,8 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
             </button>
           </div>
         )}
-        <div className="grid grid-cols-[60px_120px_1fr_80px_80px] text-sm">
+        <div className="overflow-x-auto">
+        <div className="grid min-w-[760px] grid-cols-[60px_140px_minmax(240px,1fr)_90px_96px] text-sm">
           <div className="bg-muted px-4 py-3 font-bold text-muted-foreground border-b border-border">순서</div>
           <div className="bg-muted px-4 py-3 font-bold text-muted-foreground border-b border-border">어휘</div>
           <div className="bg-muted px-4 py-3 font-bold text-muted-foreground border-b border-border">뜻</div>
@@ -1269,6 +1331,7 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
               선택된 세션에 아직 등록된 어휘가 없습니다.
             </div>
           )}
+        </div>
         </div>
       </section>
     </div>
