@@ -77,17 +77,18 @@ interface CreateWordInput {
 
 const BOOTSTRAP_SESSION_SIZE = 10;
 const CSV_HEADERS = {
-  id: "ID",
-  word: "표기통일",
-  meaning: "뜻검수",
-  example: "예문",
-  // Legacy single-example header (backward compat: read only 예문1)
-  example1: "예문1",
-  relatedWords: "관련어",
-  relatedWords10: "관련어10",
-  l4: "L4음절선택",
-  l5: "L5어절조립",
-};
+  id: ["ID", "id"],
+  word: ["표기통일", "어휘", "단어", "word"],
+  meaning: ["뜻검수", "뜻", "의미", "meaning"],
+  // Single and multi-example variants
+  example: ["예문", "example"],
+  example1: ["예문1", "예문 1", "example1"],
+  example2: ["예문2", "예문 2", "example2"],
+  example3: ["예문3", "예문 3", "example3"],
+  relatedWords: ["관련어10", "관련어", "관련 단어", "relatedWords"],
+  l4: ["L4음절선택", "음절 선택(L4)", "L4", "l4"],
+  l5: ["L5어절조립", "어절 조립(L5)", "L5", "l5"],
+} as const;
 
 function normalizeHeader(value: string): string {
   return value.replace(/^\uFEFF/, "").trim();
@@ -231,6 +232,14 @@ function parseL5(field: string): VocabStage5Data {
   return { chunks, targetIndex, vocabDistractor, hints, fullDistractors };
 }
 
+function resolveHeaderIndex(indexByHeader: Map<string, number>, candidates: readonly string[]) {
+  for (const header of candidates) {
+    const idx = indexByHeader.get(header);
+    if (idx !== undefined) return idx;
+  }
+  return -1;
+}
+
 function parseCsvText(csvText: string): ParsedCsvWord[] {
   const rows = splitCsvRows(csvText);
   if (rows.length < 2) return [];
@@ -238,44 +247,50 @@ function parseCsvText(csvText: string): ParsedCsvWord[] {
   const headers = parseCsvLine(rows[0]).map(normalizeHeader);
   const indexByHeader = new Map(headers.map((header, index) => [header, index]));
 
+  const idx = {
+    id: resolveHeaderIndex(indexByHeader, CSV_HEADERS.id),
+    word: resolveHeaderIndex(indexByHeader, CSV_HEADERS.word),
+    meaning: resolveHeaderIndex(indexByHeader, CSV_HEADERS.meaning),
+    example: resolveHeaderIndex(indexByHeader, CSV_HEADERS.example),
+    example1: resolveHeaderIndex(indexByHeader, CSV_HEADERS.example1),
+    example2: resolveHeaderIndex(indexByHeader, CSV_HEADERS.example2),
+    example3: resolveHeaderIndex(indexByHeader, CSV_HEADERS.example3),
+    relatedWords: resolveHeaderIndex(indexByHeader, CSV_HEADERS.relatedWords),
+    l4: resolveHeaderIndex(indexByHeader, CSV_HEADERS.l4),
+    l5: resolveHeaderIndex(indexByHeader, CSV_HEADERS.l5),
+  };
+
   return rows.slice(1).flatMap((row) => {
     const fields = parseCsvLine(row);
-    const word = fields[indexByHeader.get(CSV_HEADERS.word) ?? -1]?.trim() ?? "";
-    const meaning = fields[indexByHeader.get(CSV_HEADERS.meaning) ?? -1]?.trim() ?? "";
-
-    if (!word || !meaning) {
+    const word = fields[idx.word] ?? "";
+    const meaning = fields[idx.meaning] ?? "";
+    if (!word.trim() || !meaning.trim()) {
       return [];
     }
 
-    const idField = fields[indexByHeader.get(CSV_HEADERS.id) ?? -1]?.trim() ?? "";
+    const idField = fields[idx.id]?.trim() ?? "";
     const parsedId = Number.parseInt(idField, 10);
 
-    // Parse examples: new format (예문) or legacy fallback (예문1 only), max 1
-    const singleExample = fields[indexByHeader.get(CSV_HEADERS.example) ?? -1]?.trim() ?? "";
-    const legacyExample = !singleExample
-      ? (fields[indexByHeader.get(CSV_HEADERS.example1) ?? -1]?.trim() ?? "")
-      : "";
-    const examples = (singleExample || legacyExample) ? [singleExample || legacyExample] : [];
+    const singleExample = fields[idx.example]?.trim() ?? "";
+    const examples = [singleExample, fields[idx.example1] ?? "", fields[idx.example2] ?? "", fields[idx.example3] ?? ""]
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .filter((item, index, arr) => arr.indexOf(item) === index);
 
-    // Parse relatedWords: support both "관련어" and legacy "관련어10"
-    const relatedWordsField =
-      fields[indexByHeader.get(CSV_HEADERS.relatedWords) ?? -1]?.trim() ??
-      fields[indexByHeader.get(CSV_HEADERS.relatedWords10) ?? -1]?.trim() ??
-      "";
-
-    // Parse l4/l5: optional - empty if not provided
-    const l4Field = fields[indexByHeader.get(CSV_HEADERS.l4) ?? -1]?.trim() ?? "";
-    const l5Field = fields[indexByHeader.get(CSV_HEADERS.l5) ?? -1]?.trim() ?? "";
+    const l4Field = (fields[idx.l4] ?? "").trim();
+    const l5Field = (fields[idx.l5] ?? "").trim();
 
     return [
       {
         id: Number.isNaN(parsedId) ? undefined : parsedId,
-        word,
-        meaning,
+        word: word.trim(),
+        meaning: meaning.trim(),
         examples,
-        relatedWords: parseRelatedWords(relatedWordsField),
+        relatedWords: parseRelatedWords(fields[idx.relatedWords] ?? ""),
         l4: l4Field ? parseL4(l4Field) : { answer: "", options: [] },
-        l5: l5Field ? parseL5(l5Field) : { chunks: [], targetIndex: 0, vocabDistractor: "", hints: [], fullDistractors: [] },
+        l5: l5Field
+          ? parseL5(l5Field)
+          : { chunks: [], targetIndex: 0, vocabDistractor: "", hints: [], fullDistractors: [] },
       },
     ];
   });
