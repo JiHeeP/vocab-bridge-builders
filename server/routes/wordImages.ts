@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { pool } from "../db";
-import { fetchAndCacheWordImages } from "../services/wordImageFetcher";
+import { fetchAndCacheWordImages, refetchWordImages } from "../services/wordImageFetcher";
 
 const router = Router();
 
@@ -50,7 +50,10 @@ router.post("/fetch", async (req, res, next) => {
       return res.status(400).send("words array is required");
     }
 
-    const result = await fetchAndCacheWordImages(words);
+    const force = req.body?.force === true;
+    const result = force
+      ? await refetchWordImages(words)
+      : await fetchAndCacheWordImages(words);
     res.json(result);
   } catch (error) {
     next(error);

@@ -33,11 +33,12 @@ export async function getWordImageWordList(): Promise<string[]> {
 
 export async function fetchAndCacheImages(
   words: { word: string; meaning: string }[],
+  force = false,
   _onProgress?: (done: number, total: number) => void,
 ): Promise<{ results: { word: string; status: string }[] }> {
   const result = await api<{ results: { word: string; status: string }[] }>("/api/word-images/fetch", {
     method: "POST",
-    body: JSON.stringify({ words }),
+    body: JSON.stringify({ words, force }),
   });
 
   imageCache = null;

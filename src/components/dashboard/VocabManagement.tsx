@@ -71,6 +71,16 @@ interface ImageFetchRow {
   query?: string;
 }
 
+function stringifyL4(data?: { answer: string; options: string[] } | null): string {
+  if (!data?.answer) return "";
+  return `정답:${data.answer} | 보기:${(data.options ?? []).join("/")}`;
+}
+
+function stringifyL5(data?: { chunks: string[]; targetIndex: number; vocabDistractor: string; hints: string[]; fullDistractors: string[] } | null): string {
+  if (!data?.chunks?.length) return "";
+  return `chunks:${data.chunks.join("/")} | targetIndex:${data.targetIndex} | vocabDistractor:${data.vocabDistractor} | hints:${data.hints.join("/")} | fullDistractors:${data.fullDistractors.join(",")}`;
+}
+
 const EMPTY_ROWS = 10;
 
 function createEmptyRows(): BulkWordRow[] {
@@ -132,6 +142,7 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
   const [sessionLoadError, setSessionLoadError] = useState<string>("");
   const [fetchingCurrentImages, setFetchingCurrentImages] = useState(false);
   const [fetchingAllImages, setFetchingAllImages] = useState(false);
+  const [refreshingImageWord, setRefreshingImageWord] = useState<string>("");
   const [imageFetchResults, setImageFetchResults] = useState<ImageFetchRow[]>([]);
   const [refreshingDefs, setRefreshingDefs] = useState(false);
 
@@ -430,6 +441,23 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
     }
   };
 
+  const handleRefreshWordImage = async (word: VocabWord) => {
+    setRefreshingImageWord(word.word);
+    try {
+      const result = await fetchAndCacheImages([{ word: word.word, meaning: word.meaning }], true);
+      setImageFetchResults(result.results);
+      setImageWords(new Set(await getWordImageWordList()));
+      toast({
+        title: "이미지를 다시 찾았습니다",
+        description: `${word.word} 이미지가 새 검색 결과로 교체되었습니다.`,
+      });
+    } catch (error) {
+      toast({ title: "이미지 다시 찾기 실패", description: String(error), variant: "destructive" });
+    } finally {
+      setRefreshingImageWord("");
+    }
+  };
+
   const handleToggleSession = async (session: VocabSession) => {
     try {
       await updateVocabSession(session.id, !session.isActive);
@@ -530,6 +558,8 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
               relatedWords: gen.relatedWords?.length > 0
                 ? gen.relatedWords.join(", ")
                 : next[rowIndex].relatedWords,
+              l4: gen.l4 ? stringifyL4(gen.l4) : next[rowIndex].l4,
+              l5: gen.l5 ? stringifyL5(gen.l5) : next[rowIndex].l5,
             };
           }
         }
@@ -538,7 +568,7 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
 
       toast({
         title: "AI 생성 완료",
-        description: `${generated.length}개 어휘의 뜻, 예문, 관련어가 생성되었습니다.`,
+        description: `${generated.length}개 어휘의 뜻, 예문, L3/L4/L5 재료가 생성되었습니다.`,
       });
       setBulkRowErrors((prev) => {
         const next = { ...prev };
@@ -719,23 +749,23 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
             <h3 className="text-xl font-bold text-foreground flex items-center gap-2">
               <BookOpen size={20} className="text-primary" /> 어휘 관리
             </h3>
-            <p className="text-sm text-muted-foreground mt-1">
-              세션 생성, 어휘 일괄 입력, AI 자동 생성, 이미지 관리를 한 화면에서 처리합니다.
-            </p>
-          </div>
-          <div className="flex gap-2">
+              <p className="text-sm text-muted-foreground mt-1">
+                세션 생성, 어휘 일괄 입력, AI 자동 생성, 이미지 관리를 한 화면에서 처리합니다.
+              </p>
+            </div>
+          <div className="flex flex-wrap gap-2 justify-end">
             <button
               onClick={() => void handleFetchCurrentImages()}
               disabled={fetchingCurrentImages || !selectedSession || sessionMissingCount === 0}
-              className="flex items-center gap-2 text-sm font-bold px-4 py-2 rounded-xl bg-primary text-primary-foreground disabled:opacity-50"
+              className="min-w-[180px] flex items-center justify-center gap-2 text-sm font-bold px-4 py-2 rounded-xl bg-primary text-primary-foreground disabled:opacity-50"
             >
               {fetchingCurrentImages ? <Loader2 size={16} className="animate-spin" /> : <ImageDown size={16} />}
-              현재 세션 이미지
+              현재 세션 이미지 수집
             </button>
             <button
               onClick={() => void handleFetchAllImages()}
               disabled={fetchingAllImages}
-              className="flex items-center gap-2 text-sm font-bold px-4 py-2 rounded-xl border border-border text-foreground hover:bg-muted"
+              className="min-w-[180px] flex items-center justify-center gap-2 text-sm font-bold px-4 py-2 rounded-xl border border-border text-foreground hover:bg-muted"
             >
               {fetchingAllImages ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
               전체 이미지 수집
@@ -743,11 +773,29 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
             <button
               onClick={() => void handleRefreshDefinitions()}
               disabled={refreshingDefs}
-              className="flex items-center gap-2 text-sm font-bold px-4 py-2 rounded-xl border border-primary text-primary hover:bg-primary/5"
+              className="min-w-[180px] flex items-center justify-center gap-2 text-sm font-bold px-4 py-2 rounded-xl border border-primary text-primary hover:bg-primary/5"
             >
               {refreshingDefs ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-              초2 뜻/예문 업데이트
+              AI 생성 기준 업데이트
             </button>
+          </div>
+        </div>
+
+        <div className="mb-6 grid gap-3 md:grid-cols-3">
+          <div className="rounded-2xl border border-border bg-muted/20 p-4">
+            <div className="text-xs font-bold text-primary">레벨 3</div>
+            <div className="mt-1 text-sm font-semibold text-foreground">관련어 10개까지 AI 생성</div>
+            <div className="mt-1 text-xs text-muted-foreground">랜덤 4개를 뽑아도 정답이 되도록 good 풀 중심으로 채웁니다.</div>
+          </div>
+          <div className="rounded-2xl border border-border bg-muted/20 p-4">
+            <div className="text-xs font-bold text-primary">레벨 4</div>
+            <div className="mt-1 text-sm font-semibold text-foreground">음절 선택용 정답/교란 자동 생성</div>
+            <div className="mt-1 text-xs text-muted-foreground">활용형, 음절 블록, 혼동용 교란 음절 규칙을 AI 프롬프트에 반영했습니다.</div>
+          </div>
+          <div className="rounded-2xl border border-border bg-muted/20 p-4">
+            <div className="text-xs font-bold text-primary">레벨 5</div>
+            <div className="mt-1 text-sm font-semibold text-foreground">4어절 문장 조립 재료 생성</div>
+            <div className="mt-1 text-xs text-muted-foreground">목적어 위치, 힌트, 어절 교란 카드까지 한 번에 생성합니다.</div>
           </div>
         </div>
 
@@ -914,7 +962,7 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
               </div>
               <p className="text-xs text-muted-foreground mb-3">
                 어휘만 입력하고 <strong>AI 자동 생성</strong> 버튼을 누르면 뜻, 예문, 관련어가 자동으로 만들어집니다.
-                음절선택(L4)과 어절조립(L5)은 저장 시 자동 생성됩니다. 직접 입력도 가능합니다.
+                이제 AI가 레벨 3 관련어, 레벨 4 음절선택, 레벨 5 어절조립까지 함께 채워 줍니다. 필요하면 직접 수정도 가능합니다.
               </p>
 
               <div className="space-y-2 overflow-x-auto">
@@ -1017,6 +1065,9 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                     {filledWordCount}개 어휘 입력됨
                   </span>
                 )}
+              </div>
+              <div className="mt-3 rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground">
+                AI 생성 시 <strong>레벨 3</strong>은 관련어 10개, <strong>레벨 4</strong>는 음절 블록 데이터, <strong>레벨 5</strong>는 4어절 조립 데이터를 우선 생성합니다.
               </div>
 
               {bulkSaveReport && (bulkSaveReport.failedRows.length > 0 || bulkSaveReport.skippedRows.length > 0) && (
@@ -1169,6 +1220,13 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                   <button onClick={() => startEditingWord(word)} className="mr-2 text-primary hover:underline text-xs font-bold">
                     <Pencil size={14} className="inline" />
                   </button>
+                  <button
+                    onClick={() => void handleRefreshWordImage(word)}
+                    className="mr-2 text-primary hover:underline text-xs font-bold"
+                    title="이미지 다시 찾기"
+                  >
+                    {refreshingImageWord === word.word ? <Loader2 size={14} className="inline animate-spin" /> : <ImageDown size={14} className="inline" />}
+                  </button>
                   <button onClick={() => void handleDeleteWord(word.id)} className="text-destructive hover:underline text-xs font-bold">
                     <Trash2 size={14} className="inline" />
                   </button>
@@ -1194,9 +1252,10 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                     ) : (
                       <>
                         <div><strong>예문:</strong> {word.examples[0] || "(없음)"}</div>
-                        <div><strong>관련어:</strong> {word.relatedWords.join(", ") || "(없음)"}</div>
+                        <div><strong>관련어(L3):</strong> {word.relatedWords.join(", ") || "(없음)"}</div>
                         <div><strong>L4 (음절선택):</strong> 정답: {word.l4.answer}, 보기: {word.l4.options.join(", ")}</div>
                         <div><strong>L5 (어절조립):</strong> {word.l5.chunks.join(" / ") || "(없음)"}</div>
+                        <div><strong>이미지 검수:</strong> {hasImage ? "현재 이미지가 연결되어 있습니다. ‘이미지 다시 찾기’로 즉시 교체를 확인할 수 있습니다." : "아직 이미지가 없습니다. 상단 수집 버튼 또는 다시 찾기를 사용하세요."}</div>
                       </>
                     )}
                   </div>
