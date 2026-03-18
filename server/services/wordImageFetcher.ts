@@ -136,3 +136,19 @@ export async function fetchAndCacheWordImages(words: ImageFetchRequestWord[]) {
     cached: existingWords.size,
   };
 }
+
+export async function refetchWordImages(words: ImageFetchRequestWord[]) {
+  const uniqueWords = Array.from(
+    new Map(words.map((item) => [item.word, item])).values(),
+  );
+
+  if (uniqueWords.length === 0) {
+    return { results: [], total: 0, fetched: 0, cached: 0 };
+  }
+
+  await pool.query("DELETE FROM word_images WHERE word = ANY($1::text[])", [
+    uniqueWords.map(({ word }) => word),
+  ]);
+
+  return fetchAndCacheWordImages(uniqueWords);
+}

@@ -232,6 +232,8 @@ export interface AiGeneratedFullVocab {
   meaning: string;
   example: string;
   relatedWords: string[];
+  l4?: VocabStage4Data;
+  l5?: VocabStage5Data;
 }
 
 export async function aiGenerateVocab(words: string[]): Promise<AiGeneratedVocab[]> {
