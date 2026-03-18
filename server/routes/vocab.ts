@@ -232,50 +232,125 @@ router.post("/bulk-words", async (req, res, next) => {
       return res.status(400).send("words array is required");
     }
 
-    const results = [];
-    for (const item of wordList) {
-      const word = item.word?.trim();
-      if (!word) continue;
-
+    const preparedRows = wordList.map((item, index) => {
+      const rowNumber = index + 1;
+      const word = String(item.word ?? "").trim();
+      const meaning = String(item.meaning ?? "").trim();
       const examples = Array.isArray(item.examples)
-        ? item.examples.filter(Boolean)
+        ? item.examples.map((example: unknown) => String(example).trim()).filter(Boolean)
         : item.example
-          ? [item.example]
+          ? [String(item.example).trim()].filter(Boolean)
           : [];
       const relatedWords = Array.isArray(item.relatedWords)
-        ? item.relatedWords.filter(Boolean)
+        ? item.relatedWords.map((relatedWord: unknown) => String(relatedWord).trim()).filter(Boolean)
         : [];
 
-      // Auto-generate l4 if not provided
-      const l4 = item.l4?.answer
-        ? { answer: item.l4.answer, options: Array.isArray(item.l4.options) ? item.l4.options : [] }
-        : generateL4Data(word);
+      return { rowNumber, word, meaning, examples, relatedWords, raw: item };
+    });
 
-      // Auto-generate l5 if not provided
-      const l5 = item.l5?.chunks?.length > 0
-        ? {
-            chunks: item.l5.chunks,
-            targetIndex: Number(item.l5.targetIndex ?? 0),
-            vocabDistractor: item.l5.vocabDistractor ?? "",
-            hints: Array.isArray(item.l5.hints) ? item.l5.hints : [],
-            fullDistractors: Array.isArray(item.l5.fullDistractors) ? item.l5.fullDistractors : [],
-          }
-        : generateL5Data(word, examples[0] || "", relatedWords);
+    const failedRows: Array<{ rowNumber: number; reason: string; word?: string }> = [];
+    const skippedRows: Array<{ rowNumber: number; reason: string; word?: string }> = [];
+    const insertedWords = [];
 
-      const created = await createVocabWord({
-        sessionId,
-        word,
-        meaning: item.meaning?.trim() || "",
-        examples,
-        relatedWords,
-        l4,
-        l5,
-        sourceType: "manual",
-      });
-      results.push(created);
+    const intraRequestSeen = new Set<string>();
+    for (const row of preparedRows) {
+      if (!row.word) {
+        failedRows.push({ rowNumber: row.rowNumber, reason: "어휘를 입력하세요." });
+        continue;
+      }
+      if (!row.meaning) {
+        failedRows.push({ rowNumber: row.rowNumber, reason: "뜻을 입력하거나 AI 자동 생성을 먼저 실행하세요.", word: row.word });
+        continue;
+      }
+      if (row.examples.length === 0) {
+        failedRows.push({ rowNumber: row.rowNumber, reason: "예문을 입력하거나 AI 자동 생성을 먼저 실행하세요.", word: row.word });
+        continue;
+      }
+
+      const normalizedWord = row.word.toLowerCase();
+      if (intraRequestSeen.has(normalizedWord)) {
+        failedRows.push({ rowNumber: row.rowNumber, reason: "같은 요청 안에 중복된 어휘가 있습니다.", word: row.word });
+        continue;
+      }
+      intraRequestSeen.add(normalizedWord);
     }
 
-    res.status(201).json({ insertedCount: results.length, words: results });
+    if (failedRows.length > 0) {
+      return res.status(400).json({
+        insertedCount: 0,
+        failedRows,
+        skippedRows,
+        insertedWords,
+      });
+    }
+
+    const existing = await pool.query<{ word: string }>(
+      "SELECT word FROM vocab_words WHERE session_id = $1",
+      [sessionId],
+    );
+    const existingWords = new Set(existing.rows.map((row) => row.word.trim().toLowerCase()));
+
+    for (const row of preparedRows) {
+      if (existingWords.has(row.word.toLowerCase())) {
+        skippedRows.push({ rowNumber: row.rowNumber, reason: "이미 이 세션에 등록된 어휘입니다.", word: row.word });
+      }
+    }
+
+    if (skippedRows.length > 0) {
+      return res.status(409).json({
+        insertedCount: 0,
+        failedRows,
+        skippedRows,
+        insertedWords,
+      });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      for (const row of preparedRows) {
+        const l4 = row.raw.l4?.answer
+          ? { answer: row.raw.l4.answer, options: Array.isArray(row.raw.l4.options) ? row.raw.l4.options : [] }
+          : generateL4Data(row.word);
+
+        const l5 = row.raw.l5?.chunks?.length > 0
+          ? {
+              chunks: row.raw.l5.chunks,
+              targetIndex: Number(row.raw.l5.targetIndex ?? 0),
+              vocabDistractor: row.raw.l5.vocabDistractor ?? "",
+              hints: Array.isArray(row.raw.l5.hints) ? row.raw.l5.hints : [],
+              fullDistractors: Array.isArray(row.raw.l5.fullDistractors) ? row.raw.l5.fullDistractors : [],
+            }
+          : generateL5Data(row.word, row.examples[0] || "", row.relatedWords);
+
+        const created = await createVocabWord({
+          sessionId,
+          word: row.word,
+          meaning: row.meaning,
+          examples: row.examples,
+          relatedWords: row.relatedWords,
+          l4,
+          l5,
+          sourceType: "manual",
+          client,
+        });
+        insertedWords.push(created);
+      }
+
+      await client.query("COMMIT");
+      res.status(201).json({
+        insertedCount: insertedWords.length,
+        failedRows,
+        skippedRows,
+        insertedWords,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   } catch (error) {
     next(error);
   }

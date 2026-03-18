@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ArrowLeft,
   BookOpen,
   CheckCircle,
@@ -7,6 +8,7 @@ import {
   ImageDown,
   Layers3,
   Loader2,
+  Pencil,
   Plus,
   RefreshCw,
   Sparkles,
@@ -16,19 +18,17 @@ import {
 } from "lucide-react";
 import {
   aiGenerateFullVocab,
-  type AiGeneratedFullVocab,
+  type BulkWordFailure,
   bulkCreateWords,
   createVocabSession,
-  createVocabWord,
   deleteVocabSession,
   deleteVocabWord,
-  getContentSubjectGroups,
   getSessionDisplayName,
-  getToolSessions,
   getVocabCatalog,
   getVocabSessionWords,
   importVocabSpreadsheet,
   refreshAllDefinitions,
+  updateVocabWord,
   updateVocabSession,
   type VocabCatalog,
   type VocabSession,
@@ -49,6 +49,26 @@ interface BulkWordRow {
   relatedWords: string;
   l4: string;
   l5: string;
+}
+
+interface BulkRowValidation {
+  word?: string;
+  meaning?: string;
+  example?: string;
+}
+
+interface UploadReport {
+  insertedCount: number;
+  skippedCount: number;
+  failedRows: BulkWordFailure[];
+  skippedRows: BulkWordFailure[];
+  createdSessions: VocabSession[];
+}
+
+interface ImageFetchRow {
+  word: string;
+  status: string;
+  query?: string;
 }
 
 const EMPTY_ROWS = 10;
@@ -94,6 +114,7 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
   const [words, setWords] = useState<VocabWord[]>([]);
   const [imageWords, setImageWords] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [loadingError, setLoadingError] = useState<string>("");
   const [selectedCategory, setSelectedCategory] = useState<VocabCategory>("tool");
   const [selectedSubject, setSelectedSubject] = useState<VocabSubject | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
@@ -104,22 +125,32 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
     label: "",
   });
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadReport, setUploadReport] = useState<UploadReport | null>(null);
   const [creatingSession, setCreatingSession] = useState(false);
   const [importing, setImporting] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(false);
+  const [sessionLoadError, setSessionLoadError] = useState<string>("");
   const [fetchingCurrentImages, setFetchingCurrentImages] = useState(false);
   const [fetchingAllImages, setFetchingAllImages] = useState(false);
+  const [imageFetchResults, setImageFetchResults] = useState<ImageFetchRow[]>([]);
   const [refreshingDefs, setRefreshingDefs] = useState(false);
 
   const [expandedWordId, setExpandedWordId] = useState<number | null>(null);
+  const [editingWordId, setEditingWordId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState({
+    word: "",
+    meaning: "",
+    example: "",
+    relatedWords: "",
+  });
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // Bulk input state
   const [bulkRows, setBulkRows] = useState<BulkWordRow[]>(createEmptyRows());
   const [aiGenerating, setAiGenerating] = useState(false);
   const [bulkSaving, setBulkSaving] = useState(false);
-
-  const toolSessions = useMemo(() => getToolSessions(catalog), [catalog]);
-  const contentGroups = useMemo(() => getContentSubjectGroups(catalog), [catalog]);
+  const [bulkRowErrors, setBulkRowErrors] = useState<Record<number, BulkRowValidation>>({});
+  const [bulkSaveReport, setBulkSaveReport] = useState<{ failedRows: BulkWordFailure[]; skippedRows: BulkWordFailure[] } | null>(null);
 
   const visibleSessions = useMemo(() => {
     if (selectedCategory === "tool") {
@@ -135,6 +166,16 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
     () => visibleSessions.find((session) => session.id === selectedSessionId) ?? null,
     [selectedSessionId, visibleSessions],
   );
+
+  const suggestedSessionNo = useMemo(() => {
+    const matchingSessions = catalog.sessions.filter((session) =>
+      session.category === sessionForm.category &&
+      (sessionForm.category === "tool" ? session.subject === null : session.subject === sessionForm.subject),
+    );
+    return matchingSessions.length > 0
+      ? Math.max(...matchingSessions.map((session) => session.sessionNo)) + 1
+      : 1;
+  }, [catalog.sessions, sessionForm.category, sessionForm.subject]);
 
   const sessionMissingCount = words.filter((word) => !imageWords.has(word.word)).length;
 
@@ -171,20 +212,32 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
     }
 
     setSessionLoading(true);
+    setSessionLoadError("");
     getVocabSessionWords(selectedSessionId)
       .then((rows) => setWords(rows))
+      .catch((error) => {
+        setWords([]);
+        setSessionLoadError(String(error));
+      })
       .finally(() => setSessionLoading(false));
   }, [selectedSessionId]);
 
   const loadData = async () => {
-    const [catalogResult, imageResult] = await Promise.all([
-      getVocabCatalog(true),
-      getWordImageWordList(),
-    ]);
+    setLoading(true);
+    setLoadingError("");
+    try {
+      const [catalogResult, imageResult] = await Promise.all([
+        getVocabCatalog(true),
+        getWordImageWordList(),
+      ]);
 
-    setCatalog(catalogResult);
-    setImageWords(new Set(imageResult));
-    setLoading(false);
+      setCatalog(catalogResult);
+      setImageWords(new Set(imageResult));
+    } catch (error) {
+      setLoadingError(String(error));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const loadAllWords = async () => {
@@ -193,8 +246,69 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
     return allWords.flat();
   };
 
+  const validateSessionForm = () => {
+    const parsedSessionNo = Number(sessionForm.sessionNo);
+    if (!Number.isInteger(parsedSessionNo) || parsedSessionNo <= 0) {
+      return "세션 번호는 1 이상의 정수여야 합니다.";
+    }
+
+    const duplicated = catalog.sessions.some((session) =>
+      session.category === sessionForm.category &&
+      (sessionForm.category === "tool" ? session.subject === null : session.subject === sessionForm.subject) &&
+      session.sessionNo === parsedSessionNo,
+    );
+
+    if (duplicated) {
+      return "같은 분류에 이미 존재하는 세션 번호입니다.";
+    }
+
+    return "";
+  };
+
+  const validateBulkRows = (targetRows: BulkWordRow[]) => {
+    const nextErrors: Record<number, BulkRowValidation> = {};
+    const duplicateMap = new Map<string, number[]>();
+
+    targetRows.forEach((row, index) => {
+      const word = row.word.trim();
+      if (!word) return;
+      const normalized = word.toLowerCase();
+      duplicateMap.set(normalized, [...(duplicateMap.get(normalized) ?? []), index]);
+    });
+
+    targetRows.forEach((row, index) => {
+      const entry: BulkRowValidation = {};
+      const word = row.word.trim();
+      if (!word) return;
+
+      if (!row.meaning.trim()) {
+        entry.meaning = "뜻을 입력하거나 AI 자동 생성을 먼저 실행하세요.";
+      }
+      if (!row.example.trim()) {
+        entry.example = "예문을 입력하거나 AI 자동 생성을 먼저 실행하세요.";
+      }
+      if (words.some((item) => item.word.trim().toLowerCase() === word.toLowerCase())) {
+        entry.word = "이미 선택한 세션에 존재하는 어휘입니다.";
+      }
+      if ((duplicateMap.get(word.toLowerCase())?.length ?? 0) > 1) {
+        entry.word = "입력 목록 안에 중복된 어휘입니다.";
+      }
+
+      if (entry.word || entry.meaning || entry.example) {
+        nextErrors[index] = entry;
+      }
+    });
+
+    return nextErrors;
+  };
+
   const handleCreateSession = async (event: React.FormEvent) => {
     event.preventDefault();
+    const validationMessage = validateSessionForm();
+    if (validationMessage) {
+      toast({ title: "세션 생성 전 확인", description: validationMessage, variant: "destructive" });
+      return;
+    }
     setCreatingSession(true);
 
     try {
@@ -217,7 +331,7 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
       });
       toast({ title: "세션이 생성되었습니다", description: getSessionDisplayName(created) });
     } catch (error) {
-      toast({ title: "세션 생성 실패", description: String(error), variant: "destructive" });
+      toast({ title: "세션 생성 실패", description: "세션 번호 또는 분류 설정을 다시 확인하세요.", variant: "destructive" });
     } finally {
       setCreatingSession(false);
     }
@@ -244,6 +358,7 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
       });
 
       setUploadFile(null);
+      setUploadReport(result);
       const nextCatalog = await getVocabCatalog(true);
       setCatalog(nextCatalog);
       if (result.createdSessions.length > 0) {
@@ -272,6 +387,7 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
     try {
       const payload = missingWords.map((word) => ({ word: word.word, meaning: word.meaning }));
       const result = await fetchAndCacheImages(payload);
+      setImageFetchResults(result.results);
       const fetched = result.results.filter((row) => row.status === "fetched").length;
       const cached = result.results.filter((row) => row.status === "already_cached").length;
       setImageWords(new Set(await getWordImageWordList()));
@@ -299,6 +415,7 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
       }
 
       const result = await fetchAndCacheImages(missingWords.map((word) => ({ word: word.word, meaning: word.meaning })));
+      setImageFetchResults(result.results);
       const fetched = result.results.filter((row) => row.status === "fetched").length;
       const cached = result.results.filter((row) => row.status === "already_cached").length;
       setImageWords(new Set(await getWordImageWordList()));
@@ -375,6 +492,12 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
       next[index] = { ...next[index], [field]: value };
       return next;
     });
+    setBulkRowErrors((prev) => {
+      if (!prev[index]) return prev;
+      const next = { ...prev };
+      next[index] = { ...next[index], [field]: undefined };
+      return next;
+    });
   };
 
   const handleAiGenerate = async () => {
@@ -389,6 +512,7 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
 
     setAiGenerating(true);
     try {
+      setBulkSaveReport(null);
       const generated = await aiGenerateFullVocab(wordsToGenerate);
 
       // Map generated results back to rows
@@ -416,6 +540,16 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
         title: "AI 생성 완료",
         description: `${generated.length}개 어휘의 뜻, 예문, 관련어가 생성되었습니다.`,
       });
+      setBulkRowErrors((prev) => {
+        const next = { ...prev };
+        Object.keys(next).forEach((key) => {
+          const index = Number(key);
+          if (bulkRows[index]?.word.trim()) {
+            next[index] = { ...next[index], meaning: undefined, example: undefined };
+          }
+        });
+        return next;
+      });
     } catch (error) {
       toast({ title: "AI 생성 실패", description: String(error), variant: "destructive" });
     } finally {
@@ -424,21 +558,57 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
   };
 
   const handleBulkSave = async () => {
-    if (!selectedSession) {
-      toast({ title: "세션을 먼저 선택하세요", variant: "destructive" });
-      return;
-    }
-
     const wordsToSave = bulkRows.filter((r) => r.word.trim());
     if (wordsToSave.length === 0) {
       toast({ title: "저장할 어휘가 없습니다", variant: "destructive" });
       return;
     }
 
+    const validationErrors = validateBulkRows(bulkRows);
+    setBulkRowErrors(validationErrors);
+    if (Object.keys(validationErrors).length > 0) {
+      toast({ title: "저장 전 확인 필요", description: "빨간 안내가 있는 행을 먼저 수정하세요.", variant: "destructive" });
+      return;
+    }
+
     setBulkSaving(true);
     try {
+      setBulkSaveReport(null);
+      let sessionToUse = selectedSession;
+      if (!sessionToUse) {
+        const draftSessionNo = sessionForm.sessionNo || String(suggestedSessionNo);
+        if (!sessionForm.sessionNo) {
+          setSessionForm((prev) => ({ ...prev, sessionNo: draftSessionNo }));
+        }
+        const parsedSessionNo = Number(draftSessionNo);
+        const duplicated = catalog.sessions.some((session) =>
+          session.category === sessionForm.category &&
+          (sessionForm.category === "tool" ? session.subject === null : session.subject === sessionForm.subject) &&
+          session.sessionNo === parsedSessionNo,
+        );
+        const validationMessage = !Number.isInteger(parsedSessionNo) || parsedSessionNo <= 0
+          ? "세션 번호는 1 이상의 정수여야 합니다."
+          : duplicated
+            ? "같은 분류에 이미 존재하는 세션 번호입니다."
+            : "";
+        if (validationMessage) {
+          toast({ title: "세션 생성 정보 확인", description: validationMessage, variant: "destructive" });
+          return;
+        }
+        sessionToUse = await createVocabSession({
+          category: sessionForm.category,
+          subject: sessionForm.category === "content" ? sessionForm.subject : null,
+          sessionNo: parsedSessionNo,
+          label: sessionForm.label.trim() || undefined,
+        });
+        await loadData();
+        setSelectedCategory(sessionToUse.category);
+        setSelectedSubject(sessionToUse.subject);
+        setSelectedSessionId(sessionToUse.id);
+      }
+
       const result = await bulkCreateWords(
-        selectedSession.id,
+        sessionToUse.id,
         wordsToSave.map((row) => ({
           word: row.word,
           meaning: row.meaning,
@@ -450,13 +620,24 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
           l5: parseL5String(row.l5) || undefined,
         })),
       );
-      setBulkRows(createEmptyRows());
-      setWords(await getVocabSessionWords(selectedSession.id));
-      setCatalog(await getVocabCatalog(true));
-      toast({
-        title: "어휘 일괄 저장 완료",
-        description: `${result.insertedCount}개 어휘가 추가되었습니다.`,
-      });
+
+      setBulkSaveReport({ failedRows: result.failedRows, skippedRows: result.skippedRows });
+      if (result.insertedCount > 0) {
+        setBulkRows(createEmptyRows());
+        setBulkRowErrors({});
+        setWords(await getVocabSessionWords(sessionToUse.id));
+        setCatalog(await getVocabCatalog(true));
+        toast({
+          title: "어휘 일괄 저장 완료",
+          description: `${result.insertedCount}개 어휘가 추가되었습니다.`,
+        });
+      } else {
+        toast({
+          title: "일괄 저장 중단",
+          description: "문제가 있는 행을 수정한 뒤 다시 저장하세요.",
+          variant: "destructive",
+        });
+      }
     } catch (error) {
       toast({ title: "일괄 저장 실패", description: String(error), variant: "destructive" });
     } finally {
@@ -464,10 +645,64 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
     }
   };
 
+  const startEditingWord = (word: VocabWord) => {
+    setEditingWordId(word.id);
+    setEditForm({
+      word: word.word,
+      meaning: word.meaning,
+      example: word.examples[0] ?? "",
+      relatedWords: word.relatedWords.join(", "),
+    });
+    setExpandedWordId(word.id);
+  };
+
+  const handleSaveEdit = async (wordId: number) => {
+    if (!editForm.word.trim() || !editForm.meaning.trim() || !editForm.example.trim()) {
+      toast({ title: "수정 전 확인", description: "어휘, 뜻, 예문은 필수입니다.", variant: "destructive" });
+      return;
+    }
+
+    setSavingEdit(true);
+    try {
+      await updateVocabWord(wordId, {
+        word: editForm.word.trim(),
+        meaning: editForm.meaning.trim(),
+        examples: [editForm.example.trim()],
+        relatedWords: editForm.relatedWords.split(",").map((item) => item.trim()).filter(Boolean),
+      });
+      if (selectedSessionId) {
+        setWords(await getVocabSessionWords(selectedSessionId));
+      }
+      setEditingWordId(null);
+      toast({ title: "어휘 수정 완료" });
+    } catch (error) {
+      toast({ title: "어휘 수정 실패", description: String(error), variant: "destructive" });
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="w-8 h-8 text-primary animate-spin" />
+      </div>
+    );
+  }
+
+  if (loadingError) {
+    return (
+      <div className="space-y-4 rounded-2xl border border-destructive/30 bg-destructive/5 p-6">
+        <div className="flex items-center gap-2 font-bold text-destructive">
+          <AlertTriangle size={18} /> 어휘 관리 화면을 불러오지 못했습니다
+        </div>
+        <div className="text-sm text-muted-foreground">{loadingError}</div>
+        <button
+          onClick={() => void loadData()}
+          className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-bold text-primary-foreground"
+        >
+          <RefreshCw size={16} /> 다시 시도
+        </button>
       </div>
     );
   }
@@ -631,7 +866,7 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                 </select>
                 <input
                   value={sessionForm.sessionNo}
-                  onChange={(event) => setSessionForm((prev) => ({ ...prev, sessionNo: event.target.value }))}
+                  onChange={(event) => setSessionForm((prev) => ({ ...prev, sessionNo: event.target.value.replace(/[^0-9]/g, "") }))}
                   className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
                   placeholder="세션 번호"
                   inputMode="numeric"
@@ -651,6 +886,9 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                   세션 만들기
                 </button>
               </form>
+              <div className="mt-3 text-xs text-muted-foreground">
+                추천 세션 번호: <button type="button" onClick={() => setSessionForm((prev) => ({ ...prev, sessionNo: String(suggestedSessionNo) }))} className="font-bold text-primary hover:underline">{suggestedSessionNo}</button>
+              </div>
             </div>
 
             <div className="rounded-2xl border border-border p-4">
@@ -665,7 +903,7 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                   </div>
                 </div>
               ) : (
-                <div className="text-sm text-muted-foreground">세션을 선택하세요.</div>
+                <div className="text-sm text-muted-foreground">세션을 선택하지 않아도 저장 시 새 세션을 만들 수 있습니다.</div>
               )}
             </div>
 
@@ -693,7 +931,8 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
 
                 {/* Rows */}
                 {bulkRows.map((row, index) => (
-                  <div key={index} className="grid grid-cols-[32px_0.7fr_1fr_1.2fr_0.8fr_0.8fr_0.8fr] gap-1.5 items-center min-w-[900px]">
+                  <div key={index} className="space-y-1 min-w-[900px]">
+                    <div className="grid grid-cols-[32px_0.7fr_1fr_1.2fr_0.8fr_0.8fr_0.8fr] gap-1.5 items-center">
                     <div className="text-xs text-muted-foreground text-center font-bold">{index + 1}</div>
                     <input
                       value={row.word}
@@ -731,6 +970,18 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                       className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none"
                       placeholder="자동생성"
                     />
+                    </div>
+                    {(bulkRowErrors[index]?.word || bulkRowErrors[index]?.meaning || bulkRowErrors[index]?.example) && (
+                      <div className="grid grid-cols-[32px_0.7fr_1fr_1.2fr_0.8fr_0.8fr_0.8fr] gap-1.5 text-[11px] text-destructive px-1">
+                        <div />
+                        <div>{bulkRowErrors[index]?.word}</div>
+                        <div>{bulkRowErrors[index]?.meaning}</div>
+                        <div>{bulkRowErrors[index]?.example}</div>
+                        <div />
+                        <div />
+                        <div />
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -747,11 +998,11 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
 
                 <button
                   onClick={() => void handleBulkSave()}
-                  disabled={bulkSaving || !selectedSession || filledWordCount === 0}
+                  disabled={bulkSaving || filledWordCount === 0}
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground disabled:opacity-50"
                 >
                   {bulkSaving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
-                  세션에 저장
+                  {selectedSession ? "세션에 저장" : "새 세션 생성 후 저장"}
                 </button>
 
                 <button
@@ -767,6 +1018,32 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                   </span>
                 )}
               </div>
+
+              {bulkSaveReport && (bulkSaveReport.failedRows.length > 0 || bulkSaveReport.skippedRows.length > 0) && (
+                <div className="mt-4 rounded-xl border border-destructive/20 bg-destructive/5 p-4 text-sm">
+                  <div className="font-bold text-destructive mb-2">일괄 저장 결과</div>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    <div>
+                      <div className="font-semibold mb-1">실패 행</div>
+                      <div className="space-y-1 text-xs text-muted-foreground">
+                        {bulkSaveReport.failedRows.length === 0 && <div>없음</div>}
+                        {bulkSaveReport.failedRows.map((row) => (
+                          <div key={`failed-${row.rowNumber}`}>{row.rowNumber}행 · {row.word ?? "-"} · {row.reason}</div>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="font-semibold mb-1">건너뛴 행</div>
+                      <div className="space-y-1 text-xs text-muted-foreground">
+                        {bulkSaveReport.skippedRows.length === 0 && <div>없음</div>}
+                        {bulkSaveReport.skippedRows.map((row) => (
+                          <div key={`skipped-${row.rowNumber}`}>{row.rowNumber}행 · {row.word ?? "-"} · {row.reason}</div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="rounded-2xl border border-border p-4">
@@ -791,16 +1068,76 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                   자동 세션 분할 업로드
                 </button>
               </form>
+              {uploadReport && (
+                <div className="mt-4 rounded-xl border border-border bg-muted/30 p-4 text-sm space-y-3">
+                  <div className="font-bold text-foreground">업로드 결과</div>
+                  <div className="text-xs text-muted-foreground">
+                    추가 {uploadReport.insertedCount}개 · 중복 건너뜀 {uploadReport.skippedCount}개 · 실패 {uploadReport.failedRows.length}개
+                  </div>
+                  <div>
+                    <div className="font-semibold mb-1">생성된 세션</div>
+                    <div className="text-xs text-muted-foreground space-y-1">
+                      {uploadReport.createdSessions.length === 0 && <div>없음</div>}
+                      {uploadReport.createdSessions.map((session) => (
+                        <div key={session.id}>{getSessionDisplayName(session)}</div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <div className="font-semibold mb-1">실패 행</div>
+                      <div className="text-xs text-muted-foreground space-y-1 max-h-40 overflow-y-auto">
+                        {uploadReport.failedRows.length === 0 && <div>없음</div>}
+                        {uploadReport.failedRows.map((row) => (
+                          <div key={`import-failed-${row.rowNumber}`}>{row.rowNumber}행 · {row.word ?? "-"} · {row.reason}</div>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="font-semibold mb-1">건너뛴 행</div>
+                      <div className="text-xs text-muted-foreground space-y-1 max-h-40 overflow-y-auto">
+                        {uploadReport.skippedRows.length === 0 && <div>없음</div>}
+                        {uploadReport.skippedRows.map((row) => (
+                          <div key={`import-skipped-${row.rowNumber}`}>{row.rowNumber}행 · {row.word ?? "-"} · {row.reason}</div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
       </section>
+
+      {imageFetchResults.length > 0 && (
+        <section className="bg-card border border-border rounded-2xl p-4 space-y-3">
+          <div className="font-bold text-foreground">이미지 수집 결과</div>
+          <div className="grid gap-2 md:grid-cols-2">
+            {imageFetchResults.map((row, index) => (
+              <div key={`${row.word}-${index}`} className="rounded-xl border border-border p-3 text-sm">
+                <div className="font-semibold text-foreground">{row.word}</div>
+                <div className="text-xs text-muted-foreground mt-1">상태: {row.status}</div>
+                <div className="text-xs text-muted-foreground">검색어: {row.query || "-"}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="bg-card border border-border rounded-2xl overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <div className="font-bold text-foreground">세션 어휘 목록</div>
           {sessionLoading && <Loader2 size={16} className="animate-spin text-primary" />}
         </div>
+        {sessionLoadError && (
+          <div className="flex items-center justify-between gap-3 border-b border-destructive/20 bg-destructive/5 px-4 py-3 text-sm">
+            <div className="text-destructive">{sessionLoadError}</div>
+            <button onClick={() => selectedSessionId && void getVocabSessionWords(selectedSessionId).then(setWords).catch((error) => setSessionLoadError(String(error)))} className="font-bold text-primary hover:underline">
+              다시 시도
+            </button>
+          </div>
+        )}
         <div className="grid grid-cols-[60px_120px_1fr_80px_80px] text-sm">
           <div className="bg-muted px-4 py-3 font-bold text-muted-foreground border-b border-border">순서</div>
           <div className="bg-muted px-4 py-3 font-bold text-muted-foreground border-b border-border">어휘</div>
@@ -829,6 +1166,9 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
                   )}
                 </div>
                 <div className="px-4 py-2.5 border-b border-border/50 text-center">
+                  <button onClick={() => startEditingWord(word)} className="mr-2 text-primary hover:underline text-xs font-bold">
+                    <Pencil size={14} className="inline" />
+                  </button>
                   <button onClick={() => void handleDeleteWord(word.id)} className="text-destructive hover:underline text-xs font-bold">
                     <Trash2 size={14} className="inline" />
                   </button>
@@ -836,10 +1176,29 @@ const VocabManagement: React.FC<Props> = ({ onBack }) => {
 
                 {isExpanded && (
                   <div className="col-span-5 bg-muted/30 px-6 py-4 border-b border-border/50 text-xs space-y-2">
-                    <div><strong>예문:</strong> {word.examples[0] || "(없음)"}</div>
-                    <div><strong>관련어:</strong> {word.relatedWords.join(", ") || "(없음)"}</div>
-                    <div><strong>L4 (음절선택):</strong> 정답: {word.l4.answer}, 보기: {word.l4.options.join(", ")}</div>
-                    <div><strong>L5 (어절조립):</strong> {word.l5.chunks.join(" / ") || "(없음)"}</div>
+                    {editingWordId === word.id ? (
+                      <div className="space-y-2">
+                        <input value={editForm.word} onChange={(event) => setEditForm((prev) => ({ ...prev, word: event.target.value }))} className="w-full rounded-lg border border-border bg-background px-3 py-2" placeholder="어휘" />
+                        <input value={editForm.meaning} onChange={(event) => setEditForm((prev) => ({ ...prev, meaning: event.target.value }))} className="w-full rounded-lg border border-border bg-background px-3 py-2" placeholder="뜻" />
+                        <input value={editForm.example} onChange={(event) => setEditForm((prev) => ({ ...prev, example: event.target.value }))} className="w-full rounded-lg border border-border bg-background px-3 py-2" placeholder="예문" />
+                        <input value={editForm.relatedWords} onChange={(event) => setEditForm((prev) => ({ ...prev, relatedWords: event.target.value }))} className="w-full rounded-lg border border-border bg-background px-3 py-2" placeholder="관련어(쉼표 구분)" />
+                        <div className="flex gap-2">
+                          <button onClick={() => void handleSaveEdit(word.id)} disabled={savingEdit} className="rounded-lg bg-primary px-3 py-2 font-bold text-primary-foreground">
+                            {savingEdit ? "저장 중..." : "저장"}
+                          </button>
+                          <button onClick={() => setEditingWordId(null)} className="rounded-lg border border-border px-3 py-2 font-bold text-foreground">
+                            취소
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div><strong>예문:</strong> {word.examples[0] || "(없음)"}</div>
+                        <div><strong>관련어:</strong> {word.relatedWords.join(", ") || "(없음)"}</div>
+                        <div><strong>L4 (음절선택):</strong> 정답: {word.l4.answer}, 보기: {word.l4.options.join(", ")}</div>
+                        <div><strong>L5 (어절조립):</strong> {word.l5.chunks.join(" / ") || "(없음)"}</div>
+                      </>
+                    )}
                   </div>
                 )}
               </React.Fragment>

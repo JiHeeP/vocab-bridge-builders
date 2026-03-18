@@ -9,8 +9,24 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function extractKeywordCandidates(text: string): string[] {
+  return text
+    .split(/[,\s/()]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2)
+    .filter((token) => !["하다", "있는", "하는", "것", "말", "뜻", "설명"].includes(token));
+}
+
 function buildQueryText({ word, meaning }: ImageFetchRequestWord) {
-  return (meaning?.trim() || word.trim()).replace(/\s+/g, " ");
+  const cleanWord = word.trim();
+  const meaningTokens = extractKeywordCandidates(meaning?.trim() || "");
+  const primaryKeyword = meaningTokens[0] ?? "";
+
+  const keywords = [cleanWord, primaryKeyword, "education", "illustration"]
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  return Array.from(new Set(keywords)).join(" ");
 }
 
 export async function fetchAndCacheWordImages(words: ImageFetchRequestWord[]) {
@@ -37,7 +53,7 @@ export async function fetchAndCacheWordImages(words: ImageFetchRequestWord[]) {
 
   if (missingWords.length === 0) {
     return {
-      results: uniqueWords.map(({ word }) => ({ word, status: "already_cached" })),
+      results: uniqueWords.map(({ word }) => ({ word, status: "already_cached", query: "-" })),
       total: uniqueWords.length,
       fetched: 0,
       cached: uniqueWords.length,
@@ -52,7 +68,7 @@ export async function fetchAndCacheWordImages(words: ImageFetchRequestWord[]) {
     try {
       const searchParams = new URLSearchParams({
         query: queryText,
-        per_page: "1",
+        per_page: "5",
         orientation: "squarish",
       });
       const response = await fetch(`https://api.unsplash.com/search/photos?${searchParams}`, {
@@ -79,7 +95,7 @@ export async function fetchAndCacheWordImages(words: ImageFetchRequestWord[]) {
         }>;
       };
 
-      const photo = data.results?.[0];
+      const photo = data.results?.find((candidate) => candidate?.urls?.small) ?? data.results?.[0];
       if (!photo) {
         results.push({ word: item.word, status: "no_results", query: queryText });
         continue;
@@ -109,9 +125,9 @@ export async function fetchAndCacheWordImages(words: ImageFetchRequestWord[]) {
     }
   }
 
-  for (const word of existingWords) {
-    results.push({ word, status: "already_cached" });
-  }
+    for (const word of existingWords) {
+      results.push({ word, status: "already_cached", query: "-" });
+    }
 
   return {
     results,

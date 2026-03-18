@@ -41,12 +41,14 @@ export interface VocabCatalog {
 export interface VocabImportFailure {
   rowNumber: number;
   reason: string;
+  word?: string;
 }
 
 export interface VocabImportResult {
   insertedCount: number;
   skippedCount: number;
   failedRows: VocabImportFailure[];
+  skippedRows: VocabImportFailure[];
   createdSessions: VocabSession[];
 }
 
@@ -201,6 +203,8 @@ export async function importVocabSpreadsheet(input: {
   return {
     ...result,
     createdSessions: Array.isArray(result.createdSessions) ? result.createdSessions.map(normalizeSession) : [],
+    failedRows: Array.isArray(result.failedRows) ? result.failedRows : [],
+    skippedRows: Array.isArray(result.skippedRows) ? result.skippedRows : [],
   };
 }
 
@@ -253,30 +257,69 @@ export interface BulkWordInput {
   l5?: { chunks: string[]; targetIndex: number; vocabDistractor: string; hints: string[]; fullDistractors: string[] };
 }
 
+export interface BulkWordFailure {
+  rowNumber: number;
+  reason: string;
+  word?: string;
+}
+
+export interface BulkCreateWordsResult {
+  insertedCount: number;
+  insertedWords: VocabWord[];
+  failedRows: BulkWordFailure[];
+  skippedRows: BulkWordFailure[];
+}
+
 export async function bulkCreateWords(
   sessionId: string,
   words: BulkWordInput[],
-): Promise<{ insertedCount: number; words: VocabWord[] }> {
-  const result = await api<{ insertedCount: number; words: any[] }>("/api/vocab/bulk-words", {
-    method: "POST",
-    body: JSON.stringify({
-      sessionId,
-      words: words.map((w) => ({
-        word: w.word,
-        meaning: w.meaning || "",
-        examples: w.example ? [w.example] : [],
-        relatedWords: w.relatedWords || [],
-        l4: w.l4 || null,
-        l5: w.l5 || null,
-      })),
-    }),
-  });
-
-  invalidateVocabCache();
-  return {
-    insertedCount: result.insertedCount,
-    words: result.words.map(normalizeWord),
+): Promise<BulkCreateWordsResult> {
+  const payload = {
+    sessionId,
+    words: words.map((w) => ({
+      word: w.word,
+      meaning: w.meaning || "",
+      examples: w.example ? [w.example] : [],
+      relatedWords: w.relatedWords || [],
+      l4: w.l4 || null,
+      l5: w.l5 || null,
+    })),
   };
+
+  try {
+    const result = await api<{ insertedCount: number; insertedWords: any[]; failedRows?: BulkWordFailure[]; skippedRows?: BulkWordFailure[] }>("/api/vocab/bulk-words", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+
+    invalidateVocabCache();
+    return {
+      insertedCount: result.insertedCount,
+      insertedWords: Array.isArray(result.insertedWords) ? result.insertedWords.map(normalizeWord) : [],
+      failedRows: Array.isArray(result.failedRows) ? result.failedRows : [],
+      skippedRows: Array.isArray(result.skippedRows) ? result.skippedRows : [],
+    };
+  } catch (error) {
+    const typedError = error as Error & {
+      data?: {
+        insertedCount?: number;
+        insertedWords?: any[];
+        failedRows?: BulkWordFailure[];
+        skippedRows?: BulkWordFailure[];
+      };
+    };
+
+    if (typedError.data) {
+      return {
+        insertedCount: typedError.data.insertedCount ?? 0,
+        insertedWords: Array.isArray(typedError.data.insertedWords) ? typedError.data.insertedWords.map(normalizeWord) : [],
+        failedRows: Array.isArray(typedError.data.failedRows) ? typedError.data.failedRows : [],
+        skippedRows: Array.isArray(typedError.data.skippedRows) ? typedError.data.skippedRows : [],
+      };
+    }
+
+    throw error;
+  }
 }
 
 export async function updateVocabWord(

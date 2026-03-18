@@ -54,6 +54,7 @@ interface ParsedCsvWord {
 interface ImportedRowFailure {
   rowNumber: number;
   reason: string;
+  word?: string;
 }
 
 const IMPORT_SESSION_SIZE = 10;
@@ -699,6 +700,7 @@ export async function importVocabSpreadsheet(input: {
   insertedCount: number;
   skippedCount: number;
   failedRows: ImportedRowFailure[];
+  skippedRows: ImportedRowFailure[];
   createdSessions: VocabSessionSummary[];
 }> {
   if (input.category === "content") {
@@ -737,6 +739,7 @@ export async function importVocabSpreadsheet(input: {
     let insertedCount = 0;
     let skippedCount = 0;
     const failedRows: ImportedRowFailure[] = [];
+    const skippedRows: ImportedRowFailure[] = [];
 
     for (let index = 0; index < parsedRows.length; index += 1) {
       const row = parsedRows[index];
@@ -744,12 +747,13 @@ export async function importVocabSpreadsheet(input: {
       const normalizedWord = row.word.trim().toLowerCase();
 
       if (!row.word || !row.meaning) {
-        failedRows.push({ rowNumber, reason: "단어 또는 뜻이 비어 있습니다" });
+        failedRows.push({ rowNumber, reason: "단어 또는 뜻이 비어 있습니다", word: row.word });
         continue;
       }
 
       if (usedWords.has(normalizedWord)) {
         skippedCount += 1;
+        skippedRows.push({ rowNumber, reason: "이미 등록된 단어입니다", word: row.word });
         continue;
       }
 
@@ -788,12 +792,13 @@ export async function importVocabSpreadsheet(input: {
         failedRows.push({
           rowNumber,
           reason: error instanceof Error ? error.message : "failed to import row",
+          word: row.word,
         });
       }
     }
 
     await client.query("COMMIT");
-    return { insertedCount, skippedCount, failedRows, createdSessions };
+    return { insertedCount, skippedCount, failedRows, skippedRows, createdSessions };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
